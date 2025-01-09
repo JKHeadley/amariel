@@ -8,7 +8,8 @@
     "start": "node dist/index.js",
     "dev": "ts-node-dev -r tsconfig-paths/register --respawn src/index.ts",
     "lint": "eslint . --ext .ts",
-    "test": "jest"
+    "test": "jest",
+    "convert-conversation": "ts-node src/scripts/convert-conversation.ts"
   },
   "dependencies": {
     "openai": "^4.0.0",
@@ -22,6 +23,7 @@
     "eslint": "^8.0.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.0.0",
-    "tsconfig-paths": "^4.2.0"
+    "tsconfig-paths": "^4.2.0",
+    "ts-node": "^10.9.2"
   }
 } 
