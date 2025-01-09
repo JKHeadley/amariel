@@ -2,15 +2,24 @@ import { NextApiRequest, NextApiResponse } from 'next'
 import { AmarielService } from '@/services/amariel-service'
 import { prisma, addMessage, getOrCreateAdminUser } from '@/lib/db'
 import { Prisma } from '@prisma/client'
+import { AIProviderType } from '@/services/ai/types'
 
 const amariel = new AmarielService(
-  process.env.OPENAI_API_KEY!,
+  process.env.AI_PROVIDER_TYPE as AIProviderType || 'openai',
+  {
+    apiKey: process.env.AI_PROVIDER_TYPE === 'xai' 
+      ? process.env.GROK_API_KEY! 
+      : process.env.OPENAI_API_KEY!,
+    model: process.env.AI_PROVIDER_TYPE === 'xai'
+      ? process.env.NEXT_PUBLIC_GROK_MODEL
+      : process.env.NEXT_PUBLIC_GPT4O_MODEL
+  },
   {
     apiKey: process.env.X_API_KEY!,
     apiSecret: process.env.X_API_SECRET!,
     accessToken: process.env.X_ACCESS_TOKEN!,
     accessTokenSecret: process.env.X_ACCESS_TOKEN_SECRET!,
-    dryRun: true
+    dryRun: process.env.DRY_RUN === 'true'
   }
 )
 
