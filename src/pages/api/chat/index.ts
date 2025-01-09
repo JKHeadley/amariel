@@ -7,12 +7,26 @@ import { AIProviderType } from '@/services/ai/types'
 const amariel = new AmarielService(
   process.env.AI_PROVIDER_TYPE as AIProviderType || 'openai',
   {
-    apiKey: process.env.AI_PROVIDER_TYPE === 'xai' 
-      ? process.env.GROK_API_KEY! 
-      : process.env.OPENAI_API_KEY!,
-    model: process.env.AI_PROVIDER_TYPE === 'xai'
-      ? process.env.NEXT_PUBLIC_GROK_MODEL
-      : process.env.NEXT_PUBLIC_GPT4O_MODEL
+    apiKey: (() => {
+      switch (process.env.AI_PROVIDER_TYPE) {
+        case 'xai':
+          return process.env.GROK_API_KEY!;
+        case 'ollama':
+          return 'ollama'; // required but unused
+        default:
+          return process.env.OPENAI_API_KEY!;
+      }
+    })(),
+    model: (() => {
+      switch (process.env.AI_PROVIDER_TYPE) {
+        case 'xai':
+          return process.env.NEXT_PUBLIC_GROK_MODEL;
+        case 'ollama':
+          return process.env.NEXT_PUBLIC_OLLAMA_MODEL;
+        default:
+          return process.env.NEXT_PUBLIC_GPT4O_MODEL;
+      }
+    })(),
   },
   {
     apiKey: process.env.X_API_KEY!,
