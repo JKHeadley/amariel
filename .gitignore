@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.local
+.DS_Store
+*.log 
+notes/Stride PRD (Product Requirements Document) Template.txt
+notes/amariel_project_thoughts.md
+example_code/
