@@ -1,13 +1,15 @@
-import { ReactNode } from 'react'
+import React from 'react';
 
 interface LayoutProps {
-  children: ReactNode
+  children: React.ReactNode;
 }
 
-export function Layout({ children }: LayoutProps) {
+export default function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen bg-background">
-      {children}
+      <main className="h-screen">
+        {children}
+      </main>
     </div>
-  )
+  );
 } 
