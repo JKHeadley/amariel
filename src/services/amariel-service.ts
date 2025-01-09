@@ -55,7 +55,7 @@ export class AmarielService {
     }
   }
 
-  private async generateResponse(prompt: string): Promise<string> {
+  public async generateResponse(prompt: string): Promise<string> {
     try {
       const messages: Message[] = [
         {
