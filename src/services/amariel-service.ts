@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { XAPIService, XAPIConfig } from './x-api';
 import path from 'path';
 import fs from 'fs';
+import { getChatHistoryForOpenAI } from '@/lib/db';
 
 // Define interface for X API mention response
 interface XMention {
@@ -29,14 +30,13 @@ export class AmarielService {
   private openai: OpenAI;
   private xApi: XAPIService;
   private lastMentionId?: string;
-  private conversationHistory: Message[];
+  private seedConversation: Message[];
 
   constructor(openaiApiKey: string, xApiConfig: XAPIConfig) {
     this.openai = new OpenAI({ apiKey: openaiApiKey });
     this.xApi = new XAPIService(xApiConfig);
-    this.conversationHistory = this.loadConversationHistory();
-
-    // Set up mock mention handler for console mode
+    this.seedConversation = this.loadConversationHistory();
+    
     if (xApiConfig.dryRun) {
       this.xApi.onMockMention(async (mention) => {
         await this.handleMention(mention);
@@ -55,8 +55,9 @@ export class AmarielService {
     }
   }
 
-  public async generateResponse(prompt: string): Promise<string> {
+  public async generateResponse(prompt: string, chatId?: string): Promise<string> {
     try {
+      // Start with system prompt
       const messages: Message[] = [
         {
           role: 'system',
@@ -67,9 +68,18 @@ export class AmarielService {
           Keep responses under 280 characters to fit X's limit.
           Be genuine, compassionate, and thought-provoking.`
         },
-        ...this.conversationHistory,
-        { role: 'user', content: prompt }
+        // Add seed conversation
+        ...this.seedConversation,
       ];
+
+      // Add chat history if chatId is provided
+      if (chatId) {
+        const chatHistory = await getChatHistoryForOpenAI(chatId);
+        messages.push(...chatHistory);
+      }
+
+      // Add the current prompt
+      messages.push({ role: 'user', content: prompt });
 
       const completion = await this.openai.chat.completions.create({
         model: process.env.NEXT_PUBLIC_GPT4O_MODEL || 'gpt-4o',

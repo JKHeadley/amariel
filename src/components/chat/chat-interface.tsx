@@ -1,22 +1,52 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card } from '@/components/ui/card'
+import { Message, Chat, User } from '@prisma/client'
 
-interface Message {
+interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
 }
 
 export function ChatInterface() {
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [currentChat, setCurrentChat] = useState<Chat | null>(null)
+
+  // Load or create chat on component mount
+  useEffect(() => {
+    async function initializeChat() {
+      try {
+        const response = await fetch('/api/chat/initialize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        })
+
+        if (!response.ok) throw new Error('Failed to initialize chat')
+
+        const { chat, messages } = await response.json()
+        console.log('Initialized chat:', chat)
+        console.log('Initial messages:', messages)
+        
+        setCurrentChat(chat)
+        setMessages(messages.map((m: Message) => ({
+          role: m.role.toLowerCase() as 'user' | 'assistant',
+          content: m.content,
+        })))
+      } catch (error) {
+        console.error('Error initializing chat:', error)
+      }
+    }
+
+    initializeChat()
+  }, [])
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isLoading) return
+    if (!input.trim() || isLoading || !currentChat) return
 
     const userMessage = { role: 'user' as const, content: input }
     setMessages(prev => [...prev, userMessage])
@@ -24,15 +54,25 @@ export function ChatInterface() {
     setIsLoading(true)
 
     try {
+      console.log('Sending message:', {
+        message: input,
+        chatId: currentChat.id,
+      })
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({
+          message: input,
+          chatId: currentChat.id,
+        }),
       })
 
       if (!response.ok) throw new Error('Failed to send message')
 
       const data = await response.json()
+      console.log('Received response:', data)
+
       setMessages(prev => [...prev, { role: 'assistant', content: data.response }])
     } catch (error) {
       console.error('Error sending message:', error)
