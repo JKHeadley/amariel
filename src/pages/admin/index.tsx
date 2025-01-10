@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useTheme } from '@/styles/ThemeProvider';
 import { UserRole } from '@prisma/client';
 import { AdminAnalyticsDashboard } from '@/components/admin/AdminAnalyticsDashboard';
+import { AdminChatInterface } from '@/components/admin/AdminChatInterface';
 import {
   BarChart3, Settings, Gift, Users, Mail,
   MessageSquare, CreditCard, AlertCircle, Activity
@@ -66,6 +67,18 @@ export default function AdminDashboard() {
     );
   }
 
+  const renderContent = () => {
+    switch (selectedTab) {
+      case 0:
+        return <AdminAnalyticsDashboard />;
+      case 1:
+        return <AdminChatInterface />;
+      // Add other cases for different tabs
+      default:
+        return <AdminAnalyticsDashboard />;
+    }
+  };
+
   return (
     <Layout>
       <div className="flex h-full">
@@ -92,8 +105,8 @@ export default function AdminDashboard() {
         </div>
 
         {/* Main content */}
-        <div className="flex-1 p-6">
-          <AdminAnalyticsDashboard />
+        <div className="flex-1 overflow-hidden">
+          {renderContent()}
         </div>
       </div>
     </Layout>
