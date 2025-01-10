@@ -13,8 +13,9 @@ export function AdminChatInput() {
     e.preventDefault();
     if (!input.trim() || isLoading || !currentChat) return;
     
-    await sendMessage(input);
+    const messageContent = input;
     setInput('');
+    await sendMessage(messageContent);
   };
 
   const adjustTextareaHeight = () => {
