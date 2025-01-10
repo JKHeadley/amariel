@@ -7,7 +7,7 @@ interface AdminChatMessageProps {
 
 export function AdminChatMessage({ message }: AdminChatMessageProps) {
   const theme = useTheme();
-  const isUser = message.role === 'user';
+  const isUser = message.role === 'USER';
 
   return (
     <div
@@ -15,11 +15,13 @@ export function AdminChatMessage({ message }: AdminChatMessageProps) {
     >
       <div
         className={`max-w-[80%] rounded-lg px-4 py-2 ${
-          isUser ? 'bg-primary text-primary-foreground' : 'bg-muted'
+          isUser 
+            ? 'bg-primary text-primary-foreground ml-auto' 
+            : 'bg-muted mr-auto'
         }`}
       >
         <div className="text-sm font-medium mb-1">
-          {isUser ? 'You' : 'Amariel'}
+          {isUser ? 'User' : 'Amariel'}
         </div>
         <div className="text-sm whitespace-pre-wrap">{message.content}</div>
         <div className="text-xs opacity-70 mt-1">

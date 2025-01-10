@@ -106,16 +106,16 @@ export const useAdminStore = create<AdminState>((set, get) => ({
         id: Date.now().toString(),
         chatId: currentChat.id,
         content,
-        role: 'user',
+        role: 'USER',
         createdAt: new Date(),
         updatedAt: new Date(),
       } as Message;
 
       set((state) => ({
-        currentChat: {
-          ...currentChat,
-          messages: [...(currentChat.messages || []), userMessage],
-        },
+        currentChat: state.currentChat ? {
+          ...state.currentChat,
+          messages: [...(state.currentChat.messages || []), userMessage],
+        } : null,
       }));
 
       // Send message to API
@@ -140,16 +140,16 @@ export const useAdminStore = create<AdminState>((set, get) => ({
         id: (Date.now() + 1).toString(),
         chatId: currentChat.id,
         content: aiResponse,
-        role: 'assistant',
+        role: 'ASSISTANT',
         createdAt: new Date(),
         updatedAt: new Date(),
       } as Message;
 
       set((state) => ({
-        currentChat: {
-          ...currentChat,
-          messages: [...(currentChat.messages || []), assistantMessage],
-        },
+        currentChat: state.currentChat ? {
+          ...state.currentChat,
+          messages: [...(state.currentChat.messages || []), assistantMessage],
+        } : null,
       }));
 
       // Update chat list to show latest message
