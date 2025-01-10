@@ -73,6 +73,11 @@ model Chat {
   // Chat metadata
   title     String?
   
+  // Thread structure
+  parentId  String?
+  parent    Chat?    @relation("ThreadReplies", fields: [parentId], references: [id])
+  replies   Chat[]   @relation("ThreadReplies")
+  
   // Relations
   user      User     @relation(fields: [userId], references: [id])
   userId    String
@@ -80,17 +85,20 @@ model Chat {
 }
 
 model Message {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
+  id        String      @id @default(cuid())
+  createdAt DateTime    @default(now())
   
   // Message content
-  role      Role     @default(USER)
-  content   String   @db.Text
+  role      Role        @default(USER)
+  type      MessageType @default(CHAT)
+  content   String      @db.Text
+  published Boolean     @default(false)
+  metadata  Json?
   
   // Relations
-  chat      Chat     @relation(fields: [chatId], references: [id])
+  chat      Chat        @relation(fields: [chatId], references: [id])
   chatId    String
-  user      User     @relation(fields: [userId], references: [id])
+  user      User        @relation(fields: [userId], references: [id])
   userId    String
 }
 
@@ -108,4 +116,9 @@ enum Role {
 enum UserRole {
   user
   admin
+}
+
+enum MessageType {
+  CHAT
+  THOUGHT
 } 

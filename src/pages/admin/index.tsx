@@ -8,9 +8,11 @@ import { useTheme } from '@/styles/ThemeProvider';
 import { UserRole } from '@prisma/client';
 import { AdminAnalyticsDashboard } from '@/components/admin/AdminAnalyticsDashboard';
 import { AdminChatInterface } from '@/components/admin/AdminChatInterface';
+import { AdminThoughtInterface } from '@/components/admin/AdminThoughtInterface';
 import {
   BarChart3, Settings, Gift, Users, Mail,
-  MessageSquare, CreditCard, AlertCircle, Activity
+  MessageSquare, CreditCard, AlertCircle, Activity,
+  BrainCircuit
 } from 'lucide-react';
 
 const tabs = [
@@ -25,6 +27,12 @@ const tabs = [
     icon: MessageSquare,
     color: 'text-purple-500',
     bgColor: 'bg-purple-100'
+  },
+  {
+    name: 'Thoughts',
+    icon: BrainCircuit,
+    color: 'text-pink-500',
+    bgColor: 'bg-pink-100'
   },
   {
     name: 'Users',
@@ -74,10 +82,12 @@ export default function AdminDashboard() {
       case 1:
         return <AdminChatInterface />;
       case 2:
-        return <div>Users content</div>;
+        return <AdminThoughtInterface />;
       case 3:
-        return <div>Credits content</div>;
+        return <div>Users content</div>;
       case 4:
+        return <div>Credits content</div>;
+      case 5:
         return <div>Alerts content</div>;
       default:
         return <AdminAnalyticsDashboard />;

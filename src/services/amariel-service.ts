@@ -100,10 +100,28 @@ export class AmarielService {
     }
   }
 
+  // Method to generate a thought without posting
+  async generateThought(context?: string): Promise<string> {
+    try {
+      const messages = createChatPrompt(this.seedConversation);
+      
+      if (context) {
+        messages.push({ role: 'user', content: `Here's some context for your thought: ${context}` });
+      }
+      
+      messages.push({ role: 'user', content: THOUGHT_PROMPT });
+      
+      return await this.aiProvider.generateCompletion(messages);
+    } catch (error) {
+      console.error('Error generating thought:', error);
+      throw error;
+    }
+  }
+
   // Method to post original thoughts/content
   async shareThought() {
     try {
-      const thought = await this.generateResponse(THOUGHT_PROMPT);
+      const thought = await this.generateThought();
       await this.xApi.postTweet(thought);
     } catch (error) {
       console.error('Error sharing thought:', error);

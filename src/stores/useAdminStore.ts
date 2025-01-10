@@ -12,6 +12,8 @@ interface AdminState {
   createNewChat: () => Promise<void>;
   deleteChat: (chatId: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
+  addThoughtChat: (chat: Chat, message: Message) => void;
+  updateChatTitle: (chatId: string, title: string) => Promise<void>;
 }
 
 export const useAdminStore = create<AdminState>((set, get) => ({
@@ -167,6 +169,43 @@ export const useAdminStore = create<AdminState>((set, get) => ({
       console.error('Error sending message:', error);
     } finally {
       set({ isLoading: false });
+    }
+  },
+
+  addThoughtChat: (chat, message) => {
+    const chatWithMessage = {
+      ...chat,
+      messages: [message],
+    };
+    set((state) => ({ 
+      chats: [chatWithMessage, ...state.chats],
+      currentChat: chatWithMessage 
+    }));
+  },
+
+  updateChatTitle: async (chatId: string, title: string) => {
+    try {
+      const response = await fetch(`/api/admin/chats/${chatId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ title }),
+      });
+      
+      if (!response.ok) throw new Error('Failed to update chat title');
+
+      set((state) => ({
+        chats: state.chats.map((chat) =>
+          chat.id === chatId ? { ...chat, title } : chat
+        ),
+        currentChat: state.currentChat?.id === chatId
+          ? { ...state.currentChat, title }
+          : state.currentChat,
+      }));
+    } catch (error) {
+      console.error('Error updating chat title:', error);
     }
   },
 })); 
