@@ -1,22 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
 import { useTheme } from '@/styles/ThemeProvider';
+import { useAdminStore } from '@/stores/useAdminStore';
 
-interface AdminChatInputProps {
-  onSubmit: (message: string) => void;
-  isLoading: boolean;
-}
-
-export function AdminChatInput({ onSubmit, isLoading }: AdminChatInputProps) {
+export function AdminChatInput() {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const theme = useTheme();
+  const { currentChat, isLoading, sendMessage } = useAdminStore();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !currentChat) return;
     
-    onSubmit(input);
+    await sendMessage(input);
     setInput('');
   };
 

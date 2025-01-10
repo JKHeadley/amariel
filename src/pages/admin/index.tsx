@@ -21,16 +21,16 @@ const tabs = [
     bgColor: 'bg-blue-100'
   },
   {
-    name: 'Users',
-    icon: Users,
-    color: 'text-green-500',
-    bgColor: 'bg-green-100'
-  },
-  {
     name: 'Messages',
     icon: MessageSquare,
     color: 'text-purple-500',
     bgColor: 'bg-purple-100'
+  },
+  {
+    name: 'Users',
+    icon: Users,
+    color: 'text-green-500',
+    bgColor: 'bg-green-100'
   },
   {
     name: 'Credits',
@@ -73,7 +73,12 @@ export default function AdminDashboard() {
         return <AdminAnalyticsDashboard />;
       case 1:
         return <AdminChatInterface />;
-      // Add other cases for different tabs
+      case 2:
+        return <div>Users content</div>;
+      case 3:
+        return <div>Credits content</div>;
+      case 4:
+        return <div>Alerts content</div>;
       default:
         return <AdminAnalyticsDashboard />;
     }
