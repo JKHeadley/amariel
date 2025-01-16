@@ -65,13 +65,18 @@ model User {
   role          UserRole  @default(user)
 }
 
+enum ChatType {
+  GENERAL
+  THOUGHT
+  X_RESPONSE
+}
+
 model Chat {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  // Chat metadata
+  id        String    @id @default(cuid())
+  type      ChatType  @default(GENERAL)
   title     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   
   // Thread structure
   parentId  String?
@@ -79,9 +84,14 @@ model Chat {
   replies   Chat[]   @relation("ThreadReplies")
   
   // Relations
-  user      User     @relation(fields: [userId], references: [id])
   userId    String
+  user      User      @relation(fields: [userId], references: [id])
   messages  Message[]
+  mentions  Mention[]
+
+  // X Context (for X_RESPONSE type chats)
+  relatedTweetId String?    @unique  // ID of the tweet being responded to
+  relatedTweet   Tweet?     @relation(fields: [relatedTweetId], references: [id])
 }
 
 model Message {
@@ -100,6 +110,49 @@ model Message {
   chatId    String
   user      User        @relation(fields: [userId], references: [id])
   userId    String
+}
+
+model SystemSettings {
+  id               String          @id @default(cuid())
+  xAutomationMode  XAutomationMode @default(SEMI_AUTOMATIC)
+  lastMentionCheck DateTime?
+  lastMentionId    String?
+  lastTweetCheck   DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+model Tweet {
+  id             String    @id
+  text           String
+  authorId       String
+  createdAt      DateTime
+  cachedAt       DateTime  @default(now())
+  conversationId String?
+  inReplyToId    String?
+  metrics        Json      // stores replyCount, retweetCount, likeCount
+  published      Boolean   @default(true)
+  isMock         Boolean   @default(false)  // Flag for mock tweets
+  
+  // Relations
+  mentions       Mention[]   @relation("TweetMentions")
+  refinementChat Chat?       // The chat used to refine the response to this tweet
+}
+
+model Mention {
+  id             String    @id
+  text           String
+  authorId       String
+  createdAt      DateTime
+  cachedAt       DateTime  @default(now())
+  conversationId String?
+  inReplyToId    String?
+  processed      Boolean   @default(false)
+  isMock         Boolean   @default(false)  // Flag for mock mentions
+  response       Tweet?    @relation("TweetMentions", fields: [responseId], references: [id])
+  responseId     String?
+  chat           Chat?     @relation(fields: [chatId], references: [id])
+  chatId         String?
 }
 
 enum UserType {
@@ -121,4 +174,9 @@ enum UserRole {
 enum MessageType {
   CHAT
   THOUGHT
+}
+
+enum XAutomationMode {
+  AUTOMATIC
+  SEMI_AUTOMATIC
 } 

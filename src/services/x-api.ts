@@ -1,247 +1,195 @@
-import { siteConfig } from '../config/siteConfig';
-import readline from 'readline';
 import crypto from 'crypto';
+import { XConfig } from './types';
 
-export interface XAPIConfig {
-  apiKey: string;
-  apiSecret: string;
-  accessToken: string;
-  accessTokenSecret: string;
-  dryRun?: boolean;
+interface Tweet {
+  id: string;
+  text: string;
+  author_id: string;
+  created_at: string;
+  public_metrics?: {
+    reply_count: number;
+    retweet_count: number;
+    like_count: number;
+  };
 }
 
-interface OAuthParams {
-  oauth_consumer_key: string;
-  oauth_nonce: string;
-  oauth_signature_method: string;
-  oauth_timestamp: string;
-  oauth_token: string;
-  oauth_version: string;
-  oauth_signature?: string;
-  [key: string]: string | undefined;
+interface TwitterResponse {
+  data: Tweet[];
 }
 
 export class XAPIService {
-  private config: XAPIConfig;
-  private baseUrl = 'https://api.x.com/2';
-  private dryRun: boolean;
-  private rl: readline.Interface | null = null;
+  private config: XConfig;
 
-  constructor(config: XAPIConfig) {
+  constructor(config: XConfig) {
     this.config = config;
-    this.dryRun = config.dryRun || false;
-
-    if (this.dryRun) {
-      this.initializeConsoleInterface();
-    }
   }
 
-  private generateOAuth1Signature(
+  private async makeAuthenticatedRequest(
+    url: string,
+    method: string,
+    queryParams?: URLSearchParams,
+    body?: Record<string, any>
+  ) {
+    if (this.config.dryRun) {
+      console.log('🌵 Dry run mode - simulating API request:', {
+        url,
+        method,
+        queryParams: queryParams?.toString(),
+        body
+      });
+      return new Response(JSON.stringify({ data: [] }));
+    }
+
+    const finalUrl = queryParams ? `${url}?${queryParams.toString()}` : url;
+    const paramsObject = queryParams ? Object.fromEntries(queryParams.entries()) : undefined;
+    const oauthParams = this.generateOAuthParams(method, url, paramsObject, body);
+    const headers = {
+      'Authorization': `OAuth ${this.formatOAuthHeaders(oauthParams)}`,
+      'Content-Type': 'application/json',
+    };
+
+    const requestOptions: RequestInit = {
+      method,
+      headers,
+    };
+
+    if (body) {
+      requestOptions.body = JSON.stringify(body);
+    }
+
+    return fetch(finalUrl, requestOptions);
+  }
+
+  private generateOAuthParams(
     method: string,
     url: string,
-    params: OAuthParams
-  ) {
-    // Step 1: Create parameter string
-    const sortedParams = Object.keys(params)
-      .sort()
-      .map(key => `${key}=${encodeURIComponent(params[key] || '')}`)
-      .join('&');
+    queryParams?: Record<string, string>,
+    body?: Record<string, any>
+  ): Record<string, string> {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonce = crypto.randomBytes(16).toString('hex');
 
-    // Step 2: Create signature base string
+    const oauthParams: Record<string, string> = {
+      oauth_consumer_key: this.config.apiKey,
+      oauth_nonce: nonce,
+      oauth_signature_method: 'HMAC-SHA1',
+      oauth_timestamp: timestamp,
+      oauth_token: this.config.accessToken,
+      oauth_version: '1.0'
+    };
+
+    // Generate signature
+    const params = {
+      ...oauthParams,
+      ...(queryParams || {}),
+      ...(body || {})
+    };
+
     const signatureBaseString = [
       method.toUpperCase(),
       encodeURIComponent(url),
-      encodeURIComponent(sortedParams)
+      encodeURIComponent(
+        Object.keys(params)
+          .sort()
+          .map(key => `${key}=${encodeURIComponent(params[key])}`)
+          .join('&')
+      )
     ].join('&');
 
-    // Step 3: Create signing key
     const signingKey = `${encodeURIComponent(this.config.apiSecret)}&${encodeURIComponent(this.config.accessTokenSecret)}`;
-
-    // Step 4: Calculate signature
     const signature = crypto
       .createHmac('sha1', signingKey)
       .update(signatureBaseString)
       .digest('base64');
 
-    return signature;
+    return {
+      ...oauthParams,
+      oauth_signature: signature
+    };
   }
 
-  private generateOAuthHeaders(
-    method: string,
-    url: string,
-    params: Record<string, string> = {}
-  ) {
-    const oauthParams: OAuthParams = {
-      oauth_consumer_key: this.config.apiKey,
-      oauth_nonce: crypto.randomBytes(16).toString('base64'),
-      oauth_signature_method: 'HMAC-SHA1',
-      oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
-      oauth_token: this.config.accessToken,
-      oauth_version: '1.0',
-      ...params
-    };
-
-    const signature = this.generateOAuth1Signature(method, url, oauthParams);
-    oauthParams.oauth_signature = signature;
-
-    const headerString = Object.keys(oauthParams)
+  private formatOAuthHeaders(params: Record<string, string>): string {
+    return Object.keys(params)
       .sort()
-      .map(key => `${key}="${encodeURIComponent(oauthParams[key] || '')}"`)
+      .map(key => `${key}="${encodeURIComponent(params[key])}"`)
       .join(', ');
-
-    return `OAuth ${headerString}`;
   }
 
-  private initializeConsoleInterface() {
-    this.rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
-
-    console.log('\n🤖 Console mode activated. Type your messages to Amariel below:');
-    console.log('(Type "exit" to quit)\n');
-
-    this.startConsoleLoop();
-  }
-
-  private async startConsoleLoop() {
-    if (!this.rl) return;
-
-    const askQuestion = () => {
-      this.rl!.question('You: ', async (input) => {
-        if (input.toLowerCase() === 'exit') {
-          console.log('Goodbye! 👋');
-          this.rl!.close();
-          process.exit(0);
+  async getUserTweets() {
+    console.log('🔍 Fetching user tweets...');
+    
+    if (this.config.dryRun) {
+      console.log('🌵 Dry run mode - returning mock tweets');
+      return [
+        {
+          id: 'mock_1',
+          text: 'This is a mock tweet in dry run mode',
+          authorId: 'mock_user',
+          createdAt: new Date().toISOString(),
+          metrics: {
+            replyCount: 0,
+            retweetCount: 0,
+            likeCount: 0
+          }
         }
+      ];
+    }
 
-        // Simulate a mention
-        const mockMention = {
-          id: Date.now().toString(),
-          text: input
+    // First get the user ID if not provided
+    let userId = process.env.X_USER_ID;
+    if (!userId) {
+      console.log('🔍 X_USER_ID not set, fetching from API...');
+      const userResponse = await this.makeAuthenticatedRequest(
+        'https://api.twitter.com/2/users/me',
+        'GET'
+      );
+
+      if (!userResponse.ok) {
+        const error = await userResponse.json();
+        throw {
+          status: userResponse.status,
+          response: userResponse,
+          message: error.detail || 'Failed to fetch user info'
         };
-
-        // Emit a mock mention event
-        this.emitMockMention(mockMention);
-        
-        // Continue the loop
-        askQuestion();
-      });
-    };
-
-    askQuestion();
-  }
-
-  private mockMentionCallbacks: ((mention: any) => void)[] = [];
-
-  public onMockMention(callback: (mention: any) => void) {
-    this.mockMentionCallbacks.push(callback);
-  }
-
-  private emitMockMention(mention: any) {
-    this.mockMentionCallbacks.forEach(callback => callback(mention));
-  }
-
-  private async makeAuthenticatedRequest(
-    endpoint: string, 
-    method: 'GET' | 'POST' | 'DELETE', 
-    data?: any
-  ) {
-    console.log('🔑 Making X API request:', { endpoint, method, dryRun: this.dryRun });
-    
-    if (this.dryRun) {
-      console.log('🌐 DRY RUN MODE ACTIVE');
-      if (endpoint === '/tweets' && method === 'POST') {
-        // For tweets and replies, print to console
-        if (data.reply) {
-          console.log('\n🤖 [DRY RUN] Amariel would reply:', data.text + '\n');
-        } else {
-          console.log('\n🤖 [DRY RUN] Amariel would tweet:', data.text + '\n');
-        }
-        return { data: { id: Date.now().toString() } };
       }
 
-      if (endpoint.includes('/likes')) {
-        console.log('❤️ [DRY RUN] Amariel would like the message\n');
-        return { data: { liked: true } };
-      }
-
-      return { data: { message: 'Dry run success' } };
+      const userData = await userResponse.json();
+      userId = userData.data.id;
+      console.log('✅ Found user ID:', userId);
     }
 
-    // Real API call logic
-    const url = `${this.baseUrl}${endpoint}`;
-    console.log('📡 Making real API call to:', url);
-    
-    const headers = {
-      'Authorization': this.generateOAuthHeaders(method, url),
-      'Content-Type': 'application/json',
-    };
-
-    try {
-      console.log('📤 Request data:', data);
-      const response = await fetch(url, {
-        method,
-        headers,
-        body: data ? JSON.stringify(data) : undefined,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error('❌ X API error:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorData,
-        });
-        throw new Error(`X API error: ${response.statusText}`);
-      }
-
-      const responseData = await response.json();
-      console.log('✅ X API response:', responseData);
-      return responseData;
-    } catch (error) {
-      console.error('❌ X API request failed:', error);
-      throw error;
-    }
-  }
-
-  // Post a tweet
-  async postTweet(text: string) {
-    console.log('🐦 Attempting to post tweet:', text);
-    return this.makeAuthenticatedRequest('/tweets', 'POST', { text });
-  }
-
-  // Reply to a tweet
-  async replyToTweet(inReplyToId: string, text: string) {
-    return this.makeAuthenticatedRequest('/tweets', 'POST', {
-      text,
-      reply: {
-        in_reply_to_tweet_id: inReplyToId
-      }
-    });
-  }
-
-  // Like a tweet
-  async likeTweet(tweetId: string) {
-    return this.makeAuthenticatedRequest(
-      `/users/${this.config.accessToken}/likes`, 
-      'POST',
-      { tweet_id: tweetId }
-    );
-  }
-
-  // Get mentions timeline
-  async getMentions(sinceId?: string) {
-    const endpoint = '/tweets/search/recent';
-    const query = `@${siteConfig.xUsername}`;
+    const url = `https://api.twitter.com/2/users/${userId}/tweets`;
     const params = new URLSearchParams({
-      query,
-      ...(sinceId && { since_id: sinceId }),
+      'tweet.fields': 'created_at,public_metrics',
+      'max_results': '10'
     });
 
-    return this.makeAuthenticatedRequest(
-      `${endpoint}?${params.toString()}`,
-      'GET'
-    );
+    const response = await this.makeAuthenticatedRequest(url, 'GET', params);
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw {
+        status: response.status,
+        response,
+        message: error.detail || 'Failed to fetch tweets'
+      };
+    }
+
+    const data = await response.json() as TwitterResponse;
+    if (!data.data) {
+      return [];
+    }
+
+    return data.data.map(tweet => ({
+      id: tweet.id,
+      text: tweet.text,
+      authorId: userId,
+      createdAt: tweet.created_at,
+      metrics: {
+        replyCount: tweet.public_metrics?.reply_count ?? 0,
+        retweetCount: tweet.public_metrics?.retweet_count ?? 0,
+        likeCount: tweet.public_metrics?.like_count ?? 0
+      }
+    }));
   }
 } 

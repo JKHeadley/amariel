@@ -9,10 +9,15 @@ import { UserRole } from '@prisma/client';
 import { AdminAnalyticsDashboard } from '@/components/admin/AdminAnalyticsDashboard';
 import { AdminChatInterface } from '@/components/admin/AdminChatInterface';
 import { AdminThoughtInterface } from '@/components/admin/AdminThoughtInterface';
+import { XAutomationSettings } from '@/components/admin/XAutomationSettings';
+import { PostsList } from '@/components/admin/PostsList';
+import { useAdminStore } from '@/stores/useAdminStore';
 import {
-  BarChart3, Settings, Gift, Users, Mail,
-  MessageSquare, CreditCard, AlertCircle, Activity,
-  BrainCircuit
+  Activity,
+  MessageSquare,
+  BrainCircuit,
+  Settings,
+  FileText
 } from 'lucide-react';
 
 const tabs = [
@@ -35,22 +40,16 @@ const tabs = [
     bgColor: 'bg-pink-100'
   },
   {
-    name: 'Users',
-    icon: Users,
+    name: 'Posts',
+    icon: FileText,
     color: 'text-green-500',
     bgColor: 'bg-green-100'
   },
   {
-    name: 'Credits',
-    icon: CreditCard,
-    color: 'text-amber-500',
-    bgColor: 'bg-amber-100'
-  },
-  {
-    name: 'Alerts',
-    icon: AlertCircle,
-    color: 'text-red-500',
-    bgColor: 'bg-red-100'
+    name: 'Settings',
+    icon: Settings,
+    color: 'text-orange-500',
+    bgColor: 'bg-orange-100'
   }
 ];
 
@@ -60,10 +59,12 @@ export default function AdminDashboard() {
   const theme = useTheme();
   const [selectedTab, setSelectedTab] = useState(0);
   const [isClient, setIsClient] = useState(false);
+  const { xAutomationMode, lastMentionCheck, updateXAutomationMode, checkMentions, fetchSettings } = useAdminStore();
 
   useEffect(() => {
     setIsClient(true);
-  }, []);
+    fetchSettings();
+  }, [fetchSettings]);
 
   if (status === 'loading' || !isClient) {
     return (
@@ -84,11 +85,18 @@ export default function AdminDashboard() {
       case 2:
         return <AdminThoughtInterface />;
       case 3:
-        return <div>Users content</div>;
+        return <PostsList />;
       case 4:
-        return <div>Credits content</div>;
-      case 5:
-        return <div>Alerts content</div>;
+        return (
+          <div className="p-6 max-w-2xl mx-auto">
+            <XAutomationSettings
+              currentMode={xAutomationMode}
+              lastCheck={lastMentionCheck}
+              onModeChange={updateXAutomationMode}
+              onCheckMentions={checkMentions}
+            />
+          </div>
+        );
       default:
         return <AdminAnalyticsDashboard />;
     }

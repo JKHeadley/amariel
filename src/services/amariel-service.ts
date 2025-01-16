@@ -84,20 +84,14 @@ export class AmarielService {
   }
 
   async checkAndRespondToMentions() {
-    try {
-      const mentions = await this.xApi.getMentions(this.lastMentionId) as XMentionsResponse;
-      
-      // Process mentions in chronological order
-      if (mentions.data && Array.isArray(mentions.data)) {
-        for (const mention of mentions.data.reverse()) {
-          await this.handleMention(mention);
-          this.lastMentionId = mention.id;
-        }
-      }
-    } catch (error) {
-      console.error('Error checking mentions:', error);
-      throw error;
-    }
+    return await this.xApi.checkAndRespondToMentions();
+  }
+
+  async getPosts() {
+    console.log('🔍 Fetching posts from X API');
+    const posts = await this.xApi.getPosts();
+    console.log(`✅ Retrieved ${posts.length} posts`);
+    return posts;
   }
 
   // Method to generate a thought without posting
