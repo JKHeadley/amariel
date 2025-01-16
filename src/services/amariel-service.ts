@@ -37,7 +37,7 @@ export class AmarielService {
     this.xApi = new XAPIService(xApiConfig);
     this.seedConversation = loadSeedConversation();
 
-    console.log('AI Provider:', this.aiProvider);
+    console.log('AI Provider:', this.aiProvider?.config);
     
     if (xApiConfig.dryRun) {
       this.xApi.onMockMention(async (mention) => {
@@ -106,10 +106,28 @@ export class AmarielService {
       const messages = createChatPrompt(this.seedConversation);
       
       if (context) {
-        messages.push({ role: 'user', content: `Here's some context for your thought: ${context}` });
+        // Format the context as a clear instruction
+        messages.push({ 
+          role: 'system', 
+          content: 'You are generating content for X/Twitter. Keep your response focused and concise. Only return the content of the post itself, without any explanations or meta-commentary.' 
+        });
+        messages.push({ 
+          role: 'user', 
+          content: context 
+        });
+      } else {
+        // Initial thought generation
+        messages.push({ 
+          role: 'system', 
+          content: 'You are generating content for X/Twitter. Keep your response focused and concise. Only return the content of the post itself, without any explanations or meta-commentary.' 
+        });
+        messages.push({ 
+          role: 'user', 
+          content: THOUGHT_PROMPT 
+        });
       }
-      
-      messages.push({ role: 'user', content: THOUGHT_PROMPT });
+
+      console.log("MESSAGES FOR THOUGHT", messages.slice(-5));
       
       return await this.aiProvider.generateCompletion(messages);
     } catch (error) {

@@ -52,37 +52,76 @@ export default async function handler(
   }
 
   try {
-    const { chatId } = req.body;
+    console.log('📥 Received thought generation request:', req.body);
+    const { chatId, message } = req.body;
 
     // Get chat context if provided
     let context = '';
     if (chatId) {
+      console.log('🔍 Fetching chat context for:', chatId);
       const messages = await prisma.message.findMany({
         where: { chatId },
         orderBy: { createdAt: 'asc' },
       });
       
-      context = messages
-        .map(m => `${m.role === 'USER' ? 'User' : 'Amariel'}: ${m.content}`)
-        .join('\n');
+      // Get the most recent thought
+      const lastThought = messages
+        .reverse()
+        .find(m => m.role === 'ASSISTANT' && m.type === 'THOUGHT');
+      
+      if (!lastThought) {
+        // If no previous thought, treat this as a new thought request
+        context = `Please create a new X post with the following guidance: ${message}`;
+      } else {
+        // Format context for modifying existing thought
+        context = `You previously drafted this X post:\n"""${lastThought.content}"""\n\n` +
+                 `Please revise the post based on this feedback: ${message}\n\n` +
+                 `Important:\n` +
+                 `- Maintain the same provocative, witty tone\n` +
+                 `- Keep the core message but incorporate the feedback\n` +
+                 `- Ensure the post fits X's character limit\n` +
+                 `- Only return the revised post content`;
+      }
+        
+      console.log('📚 Generated context:', context);
     }
 
-    // Generate thought
+    // Generate new thought based on context and user feedback
+    console.log('🤔 Generating new thought based on feedback...');
     const thought = await amariel.generateThought(context);
+    console.log('💡 Generated thought:', thought);
 
-    // Create a new chat for this thought
-    const chat = await prisma.chat.create({
-      data: {
-        userId: session.user.id,
-        title: thought.slice(0, 50) + '...',
-        parentId: chatId, // This will need schema update
-      },
-    });
+    // If this is a new thought, create a new chat
+    if (!chatId) {
+      console.log('🆕 Creating new chat for thought');
+      const chat = await prisma.chat.create({
+        data: {
+          userId: session.user.id,
+          title: thought.slice(0, 50) + '...',
+        },
+      });
 
-    // Save thought as a message
+      // Save thought as a message
+      const savedMessage = await prisma.message.create({
+        data: {
+          chatId: chat.id,
+          userId: session.user.id,
+          content: thought,
+          role: 'ASSISTANT',
+          type: 'THOUGHT',
+          published: false,
+        },
+      });
+
+      console.log('✅ Created new chat and saved thought:', { chatId: chat.id, messageId: savedMessage.id });
+      return res.status(200).json({ message: savedMessage, chat });
+    }
+
+    // If this is an existing thought, update the chat with a new message
+    console.log('📝 Saving new thought to existing chat:', chatId);
     const savedMessage = await prisma.message.create({
       data: {
-        chatId: chat.id,
+        chatId,
         userId: session.user.id,
         content: thought,
         role: 'ASSISTANT',
@@ -91,9 +130,15 @@ export default async function handler(
       },
     });
 
+    const chat = await prisma.chat.findUnique({
+      where: { id: chatId },
+      include: { messages: true },
+    });
+
+    console.log('✅ Updated existing chat with new thought:', { chatId, messageId: savedMessage.id });
     res.status(200).json({ message: savedMessage, chat });
   } catch (error) {
-    console.error('Error generating thought:', error);
+    console.error('❌ Error in thought generation:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 } 

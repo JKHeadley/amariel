@@ -101,6 +101,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     if (!currentChat) return;
 
     try {
+      console.log('🚀 Starting message send process:', { chatId: currentChat.id, content });
       set({ isLoading: true });
 
       // Add user message immediately
@@ -113,6 +114,7 @@ export const useAdminStore = create<AdminState>((set, get) => ({
         updatedAt: new Date(),
       } as Message;
 
+      console.log('📝 Adding user message to UI:', userMessage);
       set((state) => ({
         currentChat: state.currentChat ? {
           ...state.currentChat,
@@ -120,8 +122,15 @@ export const useAdminStore = create<AdminState>((set, get) => ({
         } : null,
       }));
 
-      // Send message to API
-      const response = await fetch('/api/chat', {
+      // Check if this is a thought chat
+      const isThoughtChat = currentChat.messages?.some(m => m.type === 'THOUGHT');
+      console.log('💭 Is thought chat?', isThoughtChat);
+
+      // Send message to appropriate endpoint
+      const endpoint = isThoughtChat ? '/api/admin/thoughts/generate' : '/api/chat';
+      console.log('🎯 Sending to endpoint:', endpoint);
+      
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -135,39 +144,53 @@ export const useAdminStore = create<AdminState>((set, get) => ({
 
       if (!response.ok) throw new Error('Failed to send message');
 
-      const { response: aiResponse } = await response.json();
+      if (isThoughtChat) {
+        const { message: thoughtMessage, chat: newChat } = await response.json();
+        console.log('💡 Received thought response:', { thoughtMessage, chatId: newChat.id });
+        
+        set((state) => {
+          console.log('🔄 Updating state with thought:', {
+            existingMessages: state.currentChat?.messages?.length || 0,
+            addingMessages: 2 // user message + thought message
+          });
+          return {
+            chats: [newChat, ...state.chats.filter(c => c.id !== currentChat.id)],
+            currentChat: {
+              ...newChat,
+              messages: [...(state.currentChat?.messages || []), userMessage, thoughtMessage],
+            },
+          };
+        });
+      } else {
+        const { response: aiResponse } = await response.json();
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          chatId: currentChat.id,
+          content: aiResponse,
+          role: 'ASSISTANT',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as Message;
 
-      // Add AI response
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        chatId: currentChat.id,
-        content: aiResponse,
-        role: 'ASSISTANT',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as Message;
-
-      set((state) => ({
-        currentChat: state.currentChat ? {
-          ...state.currentChat,
-          messages: [...(state.currentChat.messages || []), assistantMessage],
-        } : null,
-      }));
-
-      // Update chat list to show latest message
-      set((state) => ({
-        chats: state.chats.map((chat) =>
-          chat.id === currentChat.id
-            ? {
-                ...chat,
-                messages: [...(chat.messages || []), userMessage, assistantMessage],
-              }
-            : chat
-        ),
-      }));
+        set((state) => ({
+          currentChat: state.currentChat ? {
+            ...state.currentChat,
+            messages: [...(state.currentChat.messages || []), assistantMessage],
+          } : null,
+          chats: state.chats.map((chat) =>
+            chat.id === currentChat.id
+              ? {
+                  ...chat,
+                  messages: [...(chat.messages || []), userMessage, assistantMessage],
+                }
+              : chat
+          ),
+        }));
+      }
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('❌ Error in sendMessage:', error);
     } finally {
+      console.log('✅ Message send process complete');
       set({ isLoading: false });
     }
   },
