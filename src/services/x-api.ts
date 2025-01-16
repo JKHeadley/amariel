@@ -79,19 +79,22 @@ export class XAPIService {
     method: 'GET' | 'POST' | 'DELETE', 
     data?: any
   ) {
+    console.log('🔑 Making X API request:', { endpoint, method, dryRun: this.dryRun });
+    
     if (this.dryRun) {
+      console.log('🌐 DRY RUN MODE ACTIVE');
       if (endpoint === '/tweets' && method === 'POST') {
         // For tweets and replies, print to console
         if (data.reply) {
-          console.log('\nAmariel: ' + data.text + '\n');
+          console.log('\n🤖 [DRY RUN] Amariel would reply:', data.text + '\n');
         } else {
-          console.log('\n💭 Amariel shares a thought: ' + data.text + '\n');
+          console.log('\n🤖 [DRY RUN] Amariel would tweet:', data.text + '\n');
         }
         return { data: { id: Date.now().toString() } };
       }
 
       if (endpoint.includes('/likes')) {
-        console.log('❤️  Amariel liked your message\n');
+        console.log('❤️ [DRY RUN] Amariel would like the message\n');
         return { data: { liked: true } };
       }
 
@@ -100,12 +103,15 @@ export class XAPIService {
 
     // Real API call logic
     const url = `${this.baseUrl}${endpoint}`;
+    console.log('📡 Making real API call to:', url);
+    
     const headers = {
       'Authorization': `Bearer ${this.config.accessToken}`,
       'Content-Type': 'application/json',
     };
 
     try {
+      console.log('📤 Request data:', data);
       const response = await fetch(url, {
         method,
         headers,
@@ -113,18 +119,27 @@ export class XAPIService {
       });
 
       if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        console.error('❌ X API error:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+        });
         throw new Error(`X API error: ${response.statusText}`);
       }
 
-      return await response.json();
+      const responseData = await response.json();
+      console.log('✅ X API response:', responseData);
+      return responseData;
     } catch (error) {
-      console.error('X API request failed:', error);
+      console.error('❌ X API request failed:', error);
       throw error;
     }
   }
 
   // Post a tweet
   async postTweet(text: string) {
+    console.log('🐦 Attempting to post tweet:', text);
     return this.makeAuthenticatedRequest('/tweets', 'POST', { text });
   }
 

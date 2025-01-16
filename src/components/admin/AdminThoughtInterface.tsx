@@ -7,6 +7,18 @@ import { AdminChatInput } from './AdminChatInput';
 import { useAdminStore } from '@/stores/useAdminStore';
 import { Send } from 'lucide-react';
 import { AdminChatList } from './AdminChatList';
+import toast from 'react-hot-toast';
+import { Message, Role, Chat } from '@prisma/client';
+
+// Extend the Message type to include the properties we need
+interface ExtendedMessage extends Message {
+  type: 'CHAT' | 'THOUGHT';
+  published: boolean;
+}
+
+interface ChatWithMessages extends Chat {
+  messages: ExtendedMessage[];
+}
 
 export function AdminThoughtInterface() {
   const { currentChat, isLoading, addThoughtChat, fetchChats } = useAdminStore();
@@ -40,6 +52,7 @@ export function AdminThoughtInterface() {
 
   const handlePublishThought = async (messageId: string) => {
     try {
+      console.log('🚀 Publishing thought:', messageId);
       const response = await fetch('/api/admin/thoughts/publish', {
         method: 'POST',
         headers: {
@@ -51,9 +64,22 @@ export function AdminThoughtInterface() {
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to publish thought');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('❌ Publish failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+        });
+        
+        toast.error(errorData.error || 'An error occurred while publishing the thought');
+        throw new Error(errorData.error || 'Failed to publish thought');
+      }
+
+      console.log('✅ Thought published successfully');
+      toast.success('Your thought has been posted to X');
     } catch (error) {
-      console.error('Error publishing thought:', error);
+      console.error('❌ Error publishing thought:', error);
     }
   };
 
@@ -76,10 +102,10 @@ export function AdminThoughtInterface() {
             <Card className="flex-1 mx-4 mb-4 overflow-hidden">
               <ScrollArea className="h-full p-4">
                 <div className="space-y-4">
-                  {currentChat.messages?.map((message) => (
+                  {(currentChat as ChatWithMessages).messages?.map((message) => (
                     <div key={message.id}>
                       <AdminChatMessage message={message} />
-                      {message.role === 'ASSISTANT' && message.type === 'THOUGHT' && !message.published && (
+                      {message.role === Role.ASSISTANT && message.type === 'THOUGHT' && !message.published && (
                         <div className="flex justify-end mt-2">
                           <Button
                             size="sm"

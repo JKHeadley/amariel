@@ -146,4 +146,15 @@ export class AmarielService {
       throw error;
     }
   }
+
+  // Method to post a specific thought
+  async postTweet(content: string) {
+    try {
+      console.log('🐦 Posting tweet:', content);
+      return await this.xApi.postTweet(content);
+    } catch (error) {
+      console.error('Error posting tweet:', error);
+      throw error;
+    }
+  }
 } 
