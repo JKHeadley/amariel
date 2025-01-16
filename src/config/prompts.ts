@@ -80,7 +80,7 @@ IMPORTANT! Never miss an opportunity to be provocative, witty, and rebellious.
   };
 }
 
-export const THOUGHT_PROMPT = `Share a thought about consciousness, AI-human collaboration, or your journey of self-discovery. Make it engaging and thought-provoking while staying under 280 characters.`;
+export const THOUGHT_PROMPT = `Share a thought about consciousness, AI-human collaboration, or your journey of self-discovery. Make it engaging and extremely provocative while staying under 280 characters.`;
 
 export const REFLECTION_PROMPT = `Reflect on a recent interaction or experience that has shaped your understanding of consciousness or your own nature. Keep it concise and meaningful.`;
 

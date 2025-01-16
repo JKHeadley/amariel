@@ -4,6 +4,7 @@ import { authOptions } from '../../auth/[...nextauth]';
 import { prisma } from '@/lib/db';
 import { AmarielService } from '@/services/amariel-service';
 import { AIProviderType } from '@/services/ai/types';
+import { THOUGHT_PROMPT } from '@/config/prompts';
 
 const amariel = new AmarielService(
   process.env.AI_PROVIDER_TYPE as AIProviderType || 'openai',
@@ -71,7 +72,7 @@ export default async function handler(
       
       if (!lastThought) {
         // If no previous thought, treat this as a new thought request
-        context = `Please create a new X post with the following guidance: ${message}`;
+        context = `Please create a new X post with the following guidance: ${THOUGHT_PROMPT}`;
       } else {
         // Format context for modifying existing thought
         context = `You previously drafted this X post:\n"""${lastThought.content}"""\n\n` +
