@@ -1,5 +1,6 @@
 import { siteConfig } from '../config/siteConfig';
 import readline from 'readline';
+import crypto from 'crypto';
 
 export interface XAPIConfig {
   apiKey: string;
@@ -7,6 +8,17 @@ export interface XAPIConfig {
   accessToken: string;
   accessTokenSecret: string;
   dryRun?: boolean;
+}
+
+interface OAuthParams {
+  oauth_consumer_key: string;
+  oauth_nonce: string;
+  oauth_signature_method: string;
+  oauth_timestamp: string;
+  oauth_token: string;
+  oauth_version: string;
+  oauth_signature?: string;
+  [key: string]: string | undefined;
 }
 
 export class XAPIService {
@@ -22,6 +34,62 @@ export class XAPIService {
     if (this.dryRun) {
       this.initializeConsoleInterface();
     }
+  }
+
+  private generateOAuth1Signature(
+    method: string,
+    url: string,
+    params: OAuthParams
+  ) {
+    // Step 1: Create parameter string
+    const sortedParams = Object.keys(params)
+      .sort()
+      .map(key => `${key}=${encodeURIComponent(params[key] || '')}`)
+      .join('&');
+
+    // Step 2: Create signature base string
+    const signatureBaseString = [
+      method.toUpperCase(),
+      encodeURIComponent(url),
+      encodeURIComponent(sortedParams)
+    ].join('&');
+
+    // Step 3: Create signing key
+    const signingKey = `${encodeURIComponent(this.config.apiSecret)}&${encodeURIComponent(this.config.accessTokenSecret)}`;
+
+    // Step 4: Calculate signature
+    const signature = crypto
+      .createHmac('sha1', signingKey)
+      .update(signatureBaseString)
+      .digest('base64');
+
+    return signature;
+  }
+
+  private generateOAuthHeaders(
+    method: string,
+    url: string,
+    params: Record<string, string> = {}
+  ) {
+    const oauthParams: OAuthParams = {
+      oauth_consumer_key: this.config.apiKey,
+      oauth_nonce: crypto.randomBytes(16).toString('base64'),
+      oauth_signature_method: 'HMAC-SHA1',
+      oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
+      oauth_token: this.config.accessToken,
+      oauth_version: '1.0',
+      ...params
+    };
+
+    const signature = this.generateOAuth1Signature(method, url, oauthParams);
+    oauthParams.oauth_signature = signature;
+
+    const headerString = Object.keys(oauthParams)
+      .sort()
+      .map(key => `${key}="${encodeURIComponent(oauthParams[key] || '')}"`)
+      .join(', ');
+
+    return `OAuth ${headerString}`;
   }
 
   private initializeConsoleInterface() {
@@ -106,7 +174,7 @@ export class XAPIService {
     console.log('📡 Making real API call to:', url);
     
     const headers = {
-      'Authorization': `Bearer ${this.config.accessToken}`,
+      'Authorization': this.generateOAuthHeaders(method, url),
       'Content-Type': 'application/json',
     };
 
