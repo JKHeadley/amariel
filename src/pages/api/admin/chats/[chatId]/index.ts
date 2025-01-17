@@ -36,6 +36,7 @@ export default async function handler(
           },
           mentions: {
             include: {
+              originalTweet: true,
               response: true
             }
           }
@@ -48,7 +49,7 @@ export default async function handler(
       }
 
       // Initialize Amariel service to generate initial response if none exists
-      if (chat.messages.length === 2) { // Only SYSTEM and USER messages exist
+      if (chat.messages.length === 1) { // Only SYSTEM message exists
         console.log('Generating initial response');
         const amariel = new AmarielService(
           (process.env.AI_PROVIDER_TYPE as AIProviderType) || 'openai',
@@ -81,8 +82,29 @@ export default async function handler(
         chat.messages.push(newMessage);
       }
 
-      // For now, return an empty thread context since we don't have parent tweet relations
-      const threadContext = [];
+      // Get thread context
+      let threadContext = [];
+      const mention = chat.mentions[0];
+      if (mention?.originalTweet) {
+        // If this is a reply, get the original tweet and any parent tweets
+        let currentTweet = mention.originalTweet;
+        const tweets = [currentTweet];
+        
+        // Follow the chain of parent tweets
+        while (currentTweet.inReplyToId) {
+          const parentTweet = await prisma.tweet.findUnique({
+            where: { id: currentTweet.inReplyToId }
+          });
+          if (parentTweet) {
+            tweets.unshift(parentTweet);
+            currentTweet = parentTweet;
+          } else {
+            break;
+          }
+        }
+        
+        threadContext = tweets;
+      }
 
       console.log('Successfully fetched chat data');
       return res.status(200).json({

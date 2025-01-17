@@ -93,7 +93,7 @@ export default async function handler(
     });
 
     console.log('Getting AI response');
-    const aiResponse = await amariel.getAIResponse(messages);
+    const aiResponse = await amariel.generateResponse(messages);
 
     console.log('Saving AI response');
     // Save AI response

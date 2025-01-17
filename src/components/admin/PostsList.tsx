@@ -302,7 +302,18 @@ export function PostsList() {
         <div className="flex gap-2">
           <Button 
             variant="default" 
-            onClick={() => window.location.href = `/admin/responses/${mention.id}`}
+            onClick={async () => {
+              try {
+                const response = await fetch(`/api/admin/x/mentions/${mention.id}/generate`, {
+                  method: 'POST'
+                });
+                if (!response.ok) throw new Error('Failed to generate response');
+                const data = await response.json();
+                window.location.href = `/admin/responses/${data.chat.id}`;
+              } catch (error) {
+                toast.error('Failed to generate response');
+              }
+            }}
           >
             Generate Response
           </Button>

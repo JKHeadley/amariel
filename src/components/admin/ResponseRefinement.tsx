@@ -4,12 +4,15 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { MessageCircle, Send } from 'lucide-react';
 import { useRouter } from 'next/router';
+import { Input } from '@/components/ui/input';
 import toast from 'react-hot-toast';
 
 interface Tweet {
   id: string;
   text: string;
   authorId: string;
+  authorName: string;
+  username: string;
   createdAt: string;
 }
 
@@ -33,6 +36,8 @@ interface Chat {
     id: string;
     text: string;
     authorId: string;
+    authorName: string;
+    username: string;
     createdAt: string;
     conversationId?: string;
     inReplyToId?: string;
@@ -160,7 +165,7 @@ export function ResponseRefinement({ chatId }: { chatId: string }) {
                 <div key={tweet.id} className="flex items-start gap-2">
                   <MessageCircle className="h-5 w-5 mt-1" />
                   <div>
-                    <div className="font-medium">@{tweet.authorId}</div>
+                    <div className="font-medium">@{tweet.username}</div>
                     <p className="text-sm">{tweet.text}</p>
                     <div className="text-xs text-muted-foreground mt-1">
                       {new Date(tweet.createdAt).toLocaleString()}
@@ -169,10 +174,10 @@ export function ResponseRefinement({ chatId }: { chatId: string }) {
                 </div>
               ))}
               {mention && (
-                <div className="flex items-start gap-2">
+                <div className="flex items-start gap-2 bg-accent/50 p-2 rounded-lg">
                   <MessageCircle className="h-5 w-5 mt-1" />
                   <div>
-                    <div className="font-medium">@{mention.authorId}</div>
+                    <div className="font-medium">@{mention.username}</div>
                     <p className="text-sm">{mention.text}</p>
                     <div className="text-xs text-muted-foreground mt-1">
                       {new Date(mention.createdAt).toLocaleString()}
@@ -219,13 +224,12 @@ export function ResponseRefinement({ chatId }: { chatId: string }) {
 
         <div className="p-4 border-t">
           <div className="flex gap-2">
-            <input
-              type="text"
+            <Input
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
               placeholder="Type your message..."
-              className="flex-1 px-3 py-2 border rounded-md"
+              className="flex-1"
             />
             <Button onClick={handleSendMessage}>
               <Send className="h-4 w-4" />

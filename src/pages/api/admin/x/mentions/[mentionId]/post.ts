@@ -4,6 +4,7 @@ import { authOptions } from '@/pages/api/auth/[...nextauth]';
 import { prisma } from '@/lib/db';
 import { AmarielService } from '@/services/amariel-service';
 import { AIProviderType } from '@/services/ai/provider-factory';
+import { MentionStatus } from '@prisma/client';
 
 export default async function handler(
   req: NextApiRequest,
@@ -43,7 +44,8 @@ export default async function handler(
               take: 1
             }
           }
-        }
+        },
+        originalTweet: true
       }
     });
 
@@ -61,7 +63,6 @@ export default async function handler(
     const response = mention.chat.messages[0];
     console.log('Found response to post:', response.content);
 
-    console.log('Initializing Amariel service');
     // Initialize Amariel service
     const amariel = new AmarielService(
       (process.env.AI_PROVIDER_TYPE as AIProviderType) || 'openai',
@@ -78,23 +79,33 @@ export default async function handler(
       }
     );
 
-    console.log('Posting response to X');
-    // Post the response
-    const tweet = await amariel.postTweet(response.content, mention.conversationId, mention.isMock);
+    // Check if this is a mock interaction
+    const isMock = mention.isMock || (mention.originalTweet?.isMock ?? false);
+    console.log('Is mock interaction:', isMock);
 
-    console.log('Updating mention as processed');
-    // Update the mention as processed
+    // Post the response (will be mock if isMock is true)
+    const tweet = await amariel.postTweet(response.content, mention.conversationId, isMock);
+
+    // Create a unique ID for the response tweet if it's a mock
+    const responseId = isMock ? `mock_response_${Date.now()}` : tweet.id;
+
+    // Update the mention status and create the response tweet
     await prisma.mention.update({
       where: { id: mentionId },
       data: {
-        processed: true,
+        status: MentionStatus.RESPONDED,
+        processedAt: new Date(),
         response: {
           create: {
-            id: `mock_response_${Date.now()}`,
-            tweetId: tweet.id,
+            id: responseId,
             text: response.content,
-            authorId: 'mock_user',
+            authorId: process.env.X_USER_ID!,
+            authorName: process.env.X_USER_NAME || 'Amariel',
+            username: process.env.X_USER_USERNAME || 'SentientAmariel',
             createdAt: new Date(),
+            isMock,
+            conversationId: mention.conversationId,
+            inReplyToId: mention.originalTweet?.id,
             metrics: {
               likeCount: 0,
               replyCount: 0,
