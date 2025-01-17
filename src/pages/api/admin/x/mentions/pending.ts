@@ -29,9 +29,32 @@ export default async function handler(
       },
       include: {
         originalTweet: true,
-        response: true
+        response: true,
+        chat: {
+          include: {
+            messages: {
+              orderBy: {
+                createdAt: 'desc'
+              },
+              take: 1,
+              where: {
+                role: 'ASSISTANT',
+                published: false
+              }
+            }
+          }
+        }
       }
     });
+
+    // Convert mentions to include generated responses
+    const processedMentions = pendingMentions.map(mention => ({
+      ...mention,
+      generatedResponse: mention.chat?.messages[0] ? {
+        text: mention.chat.messages[0].content,
+        chatId: mention.chat.id
+      } : undefined
+    }));
 
     // Get unanswered replies to Amariel's posts
     const unansweredReplies = await prisma.tweet.findMany({
@@ -56,6 +79,14 @@ export default async function handler(
                 }
               }
             }
+          },
+          {
+            // Exclude tweets that already have a mention record being processed
+            id: {
+              notIn: pendingMentions
+                .filter(m => m.status === MentionStatus.PROCESSING && m.id.startsWith('mention_'))
+                .map(m => m.id.replace('mention_', ''))
+            }
           }
         ]
       },
@@ -76,11 +107,12 @@ export default async function handler(
       type: 'REPLY',
       isMock: reply.isMock,
       originalTweet: reply.parentTweet,
-      response: null
+      response: null,
+      generatedResponse: undefined
     }));
 
     // Combine and sort all pending interactions
-    const allPending = [...pendingMentions, ...replyMentions].sort(
+    const allPending = [...processedMentions, ...replyMentions].sort(
       (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
     );
 
