@@ -126,33 +126,61 @@ model Tweet {
   id             String    @id
   text           String
   authorId       String
+  authorName     String    @default("unknown")// Display name for the author
   createdAt      DateTime
   cachedAt       DateTime  @default(now())
-  conversationId String?
-  inReplyToId    String?
+  conversationId String?   // ID of the root tweet in the thread
+  inReplyToId    String?   // ID of the parent tweet being replied to
   metrics        Json      // stores replyCount, retweetCount, likeCount
   published      Boolean   @default(true)
   isMock         Boolean   @default(false)  // Flag for mock tweets
   
   // Relations
-  mentions       Mention[]   @relation("TweetMentions")
+  mentions       Mention[]   @relation("TweetMentions")    // Mentions/replies received for this tweet
+  replies        Mention[]   @relation("TweetReplies")     // Mentions that are replies to this tweet
+  parentTweet    Tweet?      @relation("TweetReplies", fields: [inReplyToId], references: [id])
+  childTweets    Tweet[]     @relation("TweetReplies")
   refinementChat Chat?       // The chat used to refine the response to this tweet
 }
 
+enum MentionStatus {
+  PENDING    // Initial state when mention is received
+  PROCESSING // Being processed by Amariel
+  RESPONDED  // Successfully responded to
+  IGNORED    // Deliberately ignored
+  FAILED     // Failed to process/respond
+}
+
+enum InteractionType {
+  MENTION  // Direct mention of @SentientAmariel
+  REPLY    // Reply to Amariel's tweet
+  QUOTE    // Quote tweet of Amariel's tweet
+}
+
 model Mention {
-  id             String    @id
+  id             String          @id
   text           String
   authorId       String
+  authorName     String          @default("unknown")// Display name for the author
   createdAt      DateTime
-  cachedAt       DateTime  @default(now())
-  conversationId String?
-  inReplyToId    String?
-  processed      Boolean   @default(false)
-  isMock         Boolean   @default(false)  // Flag for mock mentions
-  response       Tweet?    @relation("TweetMentions", fields: [responseId], references: [id])
-  responseId     String?
-  chat           Chat?     @relation(fields: [chatId], references: [id])
-  chatId         String?
+  cachedAt       DateTime        @default(now())
+  conversationId String?         // ID of the thread this mention belongs to
+  inReplyToId    String?         // ID of the tweet being replied to (if this is a reply)
+  isMock         Boolean         @default(false)  // Flag for mock mentions
+  
+  // Enhanced status tracking
+  type           InteractionType @default(MENTION)
+  status         MentionStatus   @default(PENDING)
+  statusReason   String?         // Optional reason for current status
+  processedAt    DateTime?       // When the mention was last processed
+  retryCount     Int            @default(0)
+  
+  // Relations
+  response       Tweet?          @relation("TweetMentions", fields: [responseId], references: [id])
+  responseId     String?         // The tweet that was posted in response to this mention
+  chat           Chat?           @relation(fields: [chatId], references: [id])
+  chatId         String?         // The chat used to generate/refine the response
+  originalTweet  Tweet?          @relation("TweetReplies", fields: [inReplyToId], references: [id])
 }
 
 enum UserType {

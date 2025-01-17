@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../auth/[...nextauth]';
 import { prisma } from '@/lib/db';
 import { nanoid } from 'nanoid';
+import { InteractionType } from '@prisma/client';
 
 export default async function handler(
   req: NextApiRequest,
@@ -62,7 +63,9 @@ export default async function handler(
           isMock: true,
           conversationId: reply.conversationId,
           inReplyToId: replyToId,
-          responseId: null
+          type: InteractionType.REPLY,
+          status: 'PENDING',
+          statusReason: 'Mock reply created for testing'
         }
       });
 
@@ -94,7 +97,9 @@ export default async function handler(
           createdAt: timestamp,
           isMock: true,
           conversationId: tweet.id,
-          responseId: null
+          type: InteractionType.MENTION,
+          status: 'PENDING',
+          statusReason: 'Mock mention created for testing'
         }
       });
 

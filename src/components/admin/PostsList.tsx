@@ -1,218 +1,371 @@
-import React, { useEffect, useState } from 'react';
-import { Card } from '@/components/ui/card';
+import { useEffect, useState } from 'react';
+import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-import { MessageCircle, Repeat2, Heart, AlertCircle, Clock } from 'lucide-react';
-import { Countdown } from '@/components/ui/countdown';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { MessageCircle, Repeat, Heart } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { MockInteractionDialog } from './MockInteractionDialog';
+import { formatDistanceToNow } from 'date-fns';
+import { ChevronLeft } from 'lucide-react';
+import { TweetComposeModal } from './TweetComposeModal';
 
 interface Post {
   id: string;
   text: string;
-  createdAt: string;
+  authorId: string;
+  authorName: string;
+  createdAt: Date;
   metrics: {
     replyCount: number;
     retweetCount: number;
     likeCount: number;
   };
+  isMock?: boolean;
+  inReplyToId?: string | null;
+  conversationId?: string | null;
 }
 
-interface RateLimitInfo {
-  limit: number;
-  remaining: number;
-  reset: number;
+interface Thread {
+  originalPost: Post;
+  reply: Post;
+}
+
+interface Mention {
+  id: string;
+  text: string;
+  authorId: string;
+  createdAt: Date;
+  processed: boolean;
+  ignored: boolean;
+}
+
+function ThreadView({ thread, onBack }: { thread: Post[]; onBack: () => void }) {
+  const [replyToPost, setReplyToPost] = useState<Post | null>(null);
+  const [nestedThread, setNestedThread] = useState<Post[] | null>(null);
+
+  const handlePostClick = async (post: Post) => {
+    try {
+      const response = await fetch(`/api/admin/x/posts/${post.id}/thread`);
+      if (!response.ok) throw new Error('Failed to fetch thread');
+      const data = await response.json();
+      setNestedThread(data.thread);
+    } catch (error) {
+      toast.error('Failed to fetch thread');
+    }
+  };
+
+  // If we're viewing a nested thread
+  if (nestedThread) {
+    return (
+      <ThreadView 
+        thread={nestedThread} 
+        onBack={() => setNestedThread(null)} 
+      />
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="sticky top-0 z-10 bg-background border-b p-4">
+        <Button variant="ghost" onClick={onBack} className="mb-2">
+          <ChevronLeft className="h-4 w-4 mr-2" />
+          Back
+        </Button>
+        <h2 className="text-xl font-bold">Thread</h2>
+      </div>
+      <ScrollArea className="flex-grow">
+        <div className="max-w-2xl mx-auto p-4 space-y-4">
+          {thread.map((post, index) => (
+            <Card 
+              key={post.id} 
+              className={`hover:bg-accent/50 cursor-pointer transition-colors ${post.isMock ? 'border-blue-500' : ''}`}
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('button')) return;
+                handlePostClick(post);
+              }}
+            >
+              <CardContent className="p-6">
+                <div className="flex justify-between items-start mb-3">
+                  <div>
+                    <div className="font-bold text-lg">{post.authorName}</div>
+                    <div className="text-sm text-muted-foreground">@{post.authorId}</div>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
+                  </div>
+                </div>
+                <p className="mb-4 text-base">{post.text}</p>
+                <PostActions 
+                  post={post} 
+                  onReplyClick={(e) => {
+                    e.stopPropagation();
+                    setReplyToPost(post);
+                  }}
+                />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </ScrollArea>
+
+      <TweetComposeModal
+        open={replyToPost !== null}
+        onClose={() => setReplyToPost(null)}
+        inReplyToId={replyToPost?.id}
+        inReplyToText={replyToPost?.text}
+        onSuccess={() => {
+          // Refresh the thread data
+          handlePostClick(thread[0]); // Refresh using the root post
+          setReplyToPost(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function PostActions({ post, onReplyClick }: { post: Post; onReplyClick: () => void }) {
+  return (
+    <div className="flex gap-6 text-sm text-muted-foreground">
+      <button 
+        onClick={onReplyClick}
+        className="flex items-center gap-1 hover:text-primary transition-colors"
+      >
+        <MessageCircle className="h-4 w-4" />
+        <span>{post.metrics.replyCount}</span>
+      </button>
+      <button className="flex items-center gap-1 hover:text-primary transition-colors">
+        <Repeat className="h-4 w-4" />
+        <span>{post.metrics.retweetCount}</span>
+      </button>
+      <button className="flex items-center gap-1 hover:text-primary transition-colors">
+        <Heart className="h-4 w-4" />
+        <span>{post.metrics.likeCount}</span>
+      </button>
+      {post.isMock && <span className="text-blue-500">Mock</span>}
+    </div>
+  );
 }
 
 export function PostsList() {
   const [posts, setPosts] = useState<Post[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [rateLimitInfo, setRateLimitInfo] = useState<RateLimitInfo | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [fromCache, setFromCache] = useState(false);
-  const [countdown, setCountdown] = useState<string>('');
-
-  const formatTimeUntilReset = (resetTimestamp: number) => {
-    const now = Math.floor(Date.now() / 1000);
-    const secondsUntilReset = Math.max(0, resetTimestamp - now);
-    const minutes = Math.floor(secondsUntilReset / 60);
-    const seconds = secondsUntilReset % 60;
-    return `${minutes}m ${seconds}s`;
-  };
-
-  useEffect(() => {
-    let intervalId: NodeJS.Timeout;
-
-    if (rateLimitInfo?.reset) {
-      // Update immediately
-      setCountdown(formatTimeUntilReset(rateLimitInfo.reset));
-
-      // Then update every second
-      intervalId = setInterval(() => {
-        const timeLeft = formatTimeUntilReset(rateLimitInfo.reset);
-        setCountdown(timeLeft);
-
-        // Clear interval if we've reached 0
-        if (timeLeft === '0m 0s') {
-          setRateLimitInfo(null);
-          clearInterval(intervalId);
-        }
-      }, 1000);
-    }
-
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [rateLimitInfo?.reset]);
-
-  const fetchPosts = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const response = await fetch('/api/admin/x/posts', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-      });
-
-      // Check rate limit headers
-      const rateLimitLimit = response.headers.get('x-rate-limit-limit');
-      const rateLimitRemaining = response.headers.get('x-rate-limit-remaining');
-      const rateLimitReset = response.headers.get('x-rate-limit-reset');
-
-      if (rateLimitLimit && rateLimitRemaining && rateLimitReset) {
-        console.log('Rate limit info:', {
-          limit: rateLimitLimit,
-          remaining: rateLimitRemaining,
-          reset: rateLimitReset
-        });
-        setRateLimitInfo({
-          limit: parseInt(rateLimitLimit),
-          remaining: parseInt(rateLimitRemaining),
-          reset: parseInt(rateLimitReset),
-        });
-      }
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch posts');
-      }
-
-      const data = await response.json();
-      setPosts(data.posts);
-      setFromCache(data.fromCache);
-      
-      if (data.error) {
-        toast.error(data.error);
-      }
-    } catch (error) {
-      console.error('Error fetching posts:', error);
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError('An unknown error occurred');
-      }
-      toast.error('Failed to fetch posts');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const [replies, setReplies] = useState<Thread[]>([]);
+  const [mentions, setMentions] = useState<Post[]>([]);
+  const [pendingMentions, setPendingMentions] = useState<Mention[]>([]);
+  const [selectedThread, setSelectedThread] = useState<Post[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [replyToPost, setReplyToPost] = useState<Post | null>(null);
 
   useEffect(() => {
     fetchPosts();
+    fetchReplies();
+    fetchMentions();
+    fetchPendingMentions();
   }, []);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleString();
+  const fetchPosts = async () => {
+    try {
+      const response = await fetch('/api/admin/x/posts');
+      if (!response.ok) throw new Error('Failed to fetch posts');
+      const data = await response.json();
+      setPosts(data.posts.filter((p: Post) => !p.inReplyToId));
+    } catch (error) {
+      toast.error('Failed to fetch posts');
+    }
   };
 
-  return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-semibold">Posts</h2>
-        <div className="flex items-center gap-4">
-          {fromCache && (
-            <div className="text-sm text-muted-foreground flex items-center gap-2">
-              <Clock className="h-4 w-4" />
-              <span>Showing cached posts</span>
-            </div>
-          )}
-          {rateLimitInfo && rateLimitInfo.remaining === 0 && countdown && (
-            <Countdown timeLeft={countdown} />
-          )}
-          <MockInteractionDialog 
-            onInteractionCreated={fetchPosts}
-            availablePosts={posts.map(post => ({
-              id: post.id,
-              text: post.text
-            }))}
-          />
+  const fetchReplies = async () => {
+    try {
+      const response = await fetch('/api/admin/x/replies');
+      if (!response.ok) throw new Error('Failed to fetch replies');
+      const data = await response.json();
+      setReplies(data.threads);
+    } catch (error) {
+      toast.error('Failed to fetch replies');
+    }
+  };
+
+  const fetchMentions = async () => {
+    try {
+      const response = await fetch('/api/admin/x/mentions');
+      if (!response.ok) throw new Error('Failed to fetch mentions');
+      const data = await response.json();
+      setMentions(data.mentions);
+    } catch (error) {
+      toast.error('Failed to fetch mentions');
+    }
+  };
+
+  const fetchPendingMentions = async () => {
+    try {
+      const response = await fetch('/api/admin/x/mentions/pending');
+      if (!response.ok) throw new Error('Failed to fetch pending mentions');
+      const data = await response.json();
+      setPendingMentions(data.mentions);
+    } catch (error) {
+      toast.error('Failed to fetch pending mentions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePostClick = async (post: Post) => {
+    try {
+      const response = await fetch(`/api/admin/x/posts/${post.id}/thread`);
+      if (!response.ok) throw new Error('Failed to fetch thread');
+      const data = await response.json();
+      setSelectedThread(data.thread);
+    } catch (error) {
+      toast.error('Failed to fetch thread');
+    }
+  };
+
+  const renderPost = (post: Post) => (
+    <Card 
+      key={post.id} 
+      className={`hover:bg-accent/50 cursor-pointer transition-colors ${post.isMock ? 'border-blue-500' : ''}`}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest('button')) return;
+        handlePostClick(post);
+      }}
+    >
+      <CardContent className="p-6">
+        <div className="flex justify-between items-start mb-3">
+          <div>
+            <div className="font-bold text-lg">{post.authorName}</div>
+            <div className="text-sm text-muted-foreground">@{post.authorId}</div>
+          </div>
+          <div className="text-sm text-muted-foreground">
+            {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
+          </div>
+        </div>
+        <p className="mb-4 text-base">{post.text}</p>
+        <PostActions 
+          post={post} 
+          onReplyClick={(e) => {
+            e.stopPropagation();
+            setReplyToPost(post);
+          }}
+        />
+      </CardContent>
+    </Card>
+  );
+
+  const renderThread = (thread: Thread) => (
+    <div key={thread.reply.id} className="space-y-4">
+      {renderPost(thread.originalPost)}
+      <div className="border-l-2 border-muted-foreground/20 ml-8 pl-8">
+        {renderPost(thread.reply)}
+      </div>
+    </div>
+  );
+
+  const renderPendingMention = (mention: Mention) => (
+    <Card key={mention.id} className="mb-4">
+      <CardContent className="p-4">
+        <div className="flex justify-between items-start mb-2">
+          <div className="font-bold">{mention.authorId}</div>
+          <div className="text-sm text-gray-500">
+            {formatDistanceToNow(new Date(mention.createdAt), { addSuffix: true })}
+          </div>
+        </div>
+        <p className="mb-2">{mention.text}</p>
+        <div className="flex gap-2">
           <Button 
-            onClick={fetchPosts} 
-            disabled={isLoading || (rateLimitInfo?.remaining === 0)}
+            variant="default" 
+            onClick={() => window.location.href = `/admin/responses/${mention.id}`}
           >
-            Refresh
+            Generate Response
+          </Button>
+          <Button 
+            variant="outline"
+            onClick={async () => {
+              try {
+                await fetch(`/api/admin/x/mentions/${mention.id}/ignore`, { method: 'POST' });
+                await fetchPendingMentions();
+                toast.success('Mention marked as ignored');
+              } catch (error) {
+                toast.error('Failed to ignore mention');
+              }
+            }}
+          >
+            Ignore
           </Button>
         </div>
+      </CardContent>
+    </Card>
+  );
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  if (selectedThread) {
+    return (
+      <ThreadView 
+        thread={selectedThread} 
+        onBack={() => setSelectedThread(null)} 
+      />
+    );
+  }
+
+  return (
+    <>
+      <div className="h-[calc(100vh-4rem)]">
+        <Tabs defaultValue="posts" className="h-full flex flex-col">
+          <TabsList className="mx-4 mb-4">
+            <TabsTrigger value="posts">Posts</TabsTrigger>
+            <TabsTrigger value="replies">Replies</TabsTrigger>
+            <TabsTrigger value="mentions">Mentions</TabsTrigger>
+            <TabsTrigger value="pending">Pending</TabsTrigger>
+          </TabsList>
+
+          <div className="flex-grow overflow-hidden">
+            <TabsContent value="posts" className="h-full m-0">
+              <ScrollArea className="h-full">
+                <div className="max-w-2xl mx-auto py-4 space-y-6">
+                  {posts.map(renderPost)}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="replies" className="h-full m-0">
+              <ScrollArea className="h-full">
+                <div className="max-w-2xl mx-auto py-4 space-y-6">
+                  {replies.map(renderThread)}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="mentions" className="h-full m-0">
+              <ScrollArea className="h-full">
+                <div className="max-w-2xl mx-auto py-4 space-y-6">
+                  {mentions.map(renderPost)}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="pending" className="h-full m-0">
+              <ScrollArea className="h-full">
+                <div className="max-w-2xl mx-auto py-4 space-y-6">
+                  {pendingMentions.map(renderPendingMention)}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+          </div>
+        </Tabs>
       </div>
 
-      {rateLimitInfo && rateLimitInfo.remaining === 0 && (
-        <Card className="p-4 mb-6 bg-yellow-50 border-yellow-200">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
-            <div>
-              <h3 className="font-medium text-yellow-900">Rate Limit Exceeded</h3>
-              <p className="text-sm text-yellow-800 mt-1">
-                X API rate limit reached. You can make {rateLimitInfo.limit} request(s) per time window.
-                {fromCache && ' Showing cached posts.'} {countdown && `Rate limit resets in ${countdown}.`}
-              </p>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {isLoading ? (
-        <div className="flex justify-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
-        </div>
-      ) : error ? (
-        <Card className="p-4">
-          <div className="flex items-center gap-3 text-red-600">
-            <AlertCircle className="h-5 w-5" />
-            <p>{error}</p>
-          </div>
-        </Card>
-      ) : (
-        <div className="grid gap-4">
-          {posts.map((post) => (
-            <Card key={post.id} className="p-4">
-              <div className="space-y-4">
-                <p className="text-sm">{post.text}</p>
-                <div className="flex justify-between items-center text-sm text-muted-foreground">
-                  <span>{formatDate(post.createdAt)}</span>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1">
-                      <MessageCircle size={16} />
-                      <span>{post.metrics.replyCount}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Repeat2 size={16} />
-                      <span>{post.metrics.retweetCount}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Heart size={16} />
-                      <span>{post.metrics.likeCount}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
+      <TweetComposeModal
+        open={replyToPost !== null}
+        onClose={() => setReplyToPost(null)}
+        inReplyToId={replyToPost?.id}
+        inReplyToText={replyToPost?.text}
+        onSuccess={() => {
+          fetchPosts();
+          fetchReplies();
+          fetchMentions();
+        }}
+      />
+    </>
   );
 } 

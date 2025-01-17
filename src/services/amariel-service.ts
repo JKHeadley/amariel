@@ -46,18 +46,19 @@ export class AmarielService {
     }
   }
 
-  public async generateResponse(prompt: string, chatId?: string): Promise<string> {
+  public async generateResponse(messages: Message[]): Promise<string> {
     try {
-      const messages = createChatPrompt(this.seedConversation);
+      console.log('CREATING CHAT PROMPT');
+      
+      // Format messages for OpenAI by mapping roles correctly and setting type to text
+      const formattedMessages = messages.map(msg => ({
+        role: msg.role.toLowerCase() as "system" | "user" | "assistant",
+        content: msg.content,
+        type: 'text' as const
+      }));
 
-      if (chatId) {
-        const chatHistory = await getChatHistoryForOpenAI(chatId);
-        messages.push(...chatHistory);
-      }
-
-      messages.push({ role: 'user', content: prompt });
-
-      return await this.aiProvider.generateCompletion(messages);
+      const response = await this.aiProvider.generateCompletion(formattedMessages);
+      return response;
     } catch (error) {
       console.error('Error generating response:', error);
       throw error;
@@ -69,7 +70,7 @@ export class AmarielService {
         
         console.log('Handling mention:', mention);
       // Generate contextual response based on mention
-      const response = await this.generateResponse(mention.text);
+      const response = await this.generateResponse(this.seedConversation);
       console.log('Generated response:', response);
       
       // Reply to the mention
@@ -142,13 +143,8 @@ export class AmarielService {
   }
 
   // Method to post a specific thought
-  async postTweet(content: string) {
-    try {
-      console.log('🐦 Posting tweet:', content);
-      return await this.xApi.postTweet(content);
-    } catch (error) {
-      console.error('Error posting tweet:', error);
-      throw error;
-    }
+  async postTweet(content: string, conversationId?: string, isMock: boolean = false) {
+    console.log('🐦 Posting tweet:', content);
+    return await this.xApi.postTweet(content, conversationId, isMock);
   }
 } 

@@ -1,6 +1,7 @@
 export interface Message {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  type?: 'text';
 }
 
 export interface AIProviderConfig {
