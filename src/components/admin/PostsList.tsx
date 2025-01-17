@@ -14,6 +14,7 @@ interface Post {
   text: string;
   authorId: string;
   authorName: string;
+  username: string;
   createdAt: Date;
   metrics: {
     replyCount: number;
@@ -35,9 +36,17 @@ interface Mention {
   id: string;
   text: string;
   authorId: string;
+  authorName: string;
+  username: string;
   createdAt: Date;
   processed: boolean;
   ignored: boolean;
+  isMock?: boolean;
+  metrics: {
+    replyCount: number;
+    retweetCount: number;
+    likeCount: number;
+  };
 }
 
 function ThreadView({ thread, onBack }: { thread: Post[]; onBack: () => void }) {
@@ -89,7 +98,7 @@ function ThreadView({ thread, onBack }: { thread: Post[]; onBack: () => void }) 
                 <div className="flex justify-between items-start mb-3">
                   <div>
                     <div className="font-bold text-lg">{post.authorName}</div>
-                    <div className="text-sm text-muted-foreground">@{post.authorId}</div>
+                    <div className="text-sm text-muted-foreground">@{post.username}</div>
                   </div>
                   <div className="text-sm text-muted-foreground">
                     {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
@@ -124,7 +133,7 @@ function ThreadView({ thread, onBack }: { thread: Post[]; onBack: () => void }) 
   );
 }
 
-function PostActions({ post, onReplyClick }: { post: Post; onReplyClick: () => void }) {
+function PostActions({ post, onReplyClick }: { post: Post; onReplyClick: (e: React.MouseEvent) => void }) {
   return (
     <div className="flex gap-6 text-sm text-muted-foreground">
       <button 
@@ -248,7 +257,7 @@ export function PostsList() {
           <div className="flex justify-between items-start mb-3">
             <div>
               <div className="font-bold text-lg">{post.authorName}</div>
-              <div className="text-sm text-muted-foreground">@{post.authorId}</div>
+              <div className="text-sm text-muted-foreground">@{post.username}</div>
             </div>
             <div className="text-sm text-muted-foreground">
               {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
