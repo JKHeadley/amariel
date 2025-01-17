@@ -39,6 +39,8 @@ export default async function handler(
         id: reply.id,
         text: reply.text,
         authorId: reply.authorId,
+        authorName: reply.authorName,
+        username: reply.username,
         createdAt: reply.createdAt,
         metrics: reply.metrics,
         isMock: reply.isMock,
