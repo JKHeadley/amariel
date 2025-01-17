@@ -10,28 +10,23 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  console.log('Received post request for mention:', req.query.mentionId);
-
   if (req.method !== 'POST') {
-    console.log('Invalid method:', req.method);
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user || session.user.role !== 'admin') {
-    console.log('Unauthorized access attempt');
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const { mentionId } = req.query;
-  if (!mentionId || typeof mentionId !== 'string') {
-    console.log('Invalid mention ID:', mentionId);
-    return res.status(400).json({ error: 'Invalid mention ID' });
-  }
+  const mentionId = req.query.mentionId as string;
 
   try {
-    console.log('Fetching mention and chat data');
-    // Get the mention and its associated chat
+    // Extract the actual tweet ID if this is a pending reply
+    const isPendingReply = mentionId.startsWith('pending_reply_');
+    const tweetId = isPendingReply ? mentionId.replace('pending_reply_', '') : null;
+
+    // Get the mention with its chat messages and relevant tweets
     const mention = await prisma.mention.findUnique({
       where: { id: mentionId },
       include: {
@@ -41,7 +36,11 @@ export default async function handler(
               orderBy: {
                 createdAt: 'desc'
               },
-              take: 1
+              take: 1,
+              where: {
+                role: 'ASSISTANT',
+                published: false
+              }
             }
           }
         },
@@ -50,12 +49,10 @@ export default async function handler(
     });
 
     if (!mention) {
-      console.log('Mention not found:', mentionId);
       return res.status(404).json({ error: 'Mention not found' });
     }
 
     if (!mention.chat || mention.chat.messages.length === 0) {
-      console.log('No response available for mention:', mentionId);
       return res.status(400).json({ error: 'No response available to post' });
     }
 
@@ -83,43 +80,66 @@ export default async function handler(
     const isMock = mention.isMock || (mention.originalTweet?.isMock ?? false);
     console.log('Is mock interaction:', isMock);
 
-    // Post the response (will be mock if isMock is true)
-    const tweet = await amariel.postTweet(response.content, mention.conversationId, isMock);
+    // Determine the correct tweet to reply to
+    let parentTweetId;
+    if (isPendingReply) {
+      // For pending replies, we reply to the tweet that triggered the pending reply
+      parentTweetId = tweetId;
+    } else {
+      // For mentions, we reply to the tweet that mentioned us
+      parentTweetId = mention.originalTweet?.id;
+    }
 
-    // Create a unique ID for the response tweet if it's a mock
-    const responseId = isMock ? `mock_response_${Date.now()}` : tweet.id;
+    let tweetRecord;
 
-    // Update the mention status and create the response tweet
+    if (isMock) {
+      // For mock tweets, create the tweet record directly
+      const responseId = `mock_response_${Date.now()}`;
+      tweetRecord = await prisma.tweet.create({
+        data: {
+          id: responseId,
+          text: response.content,
+          authorId: process.env.X_USER_ID!,
+          authorName: process.env.X_USER_NAME || 'Amariel',
+          username: process.env.X_USER_USERNAME || 'SentientAmariel',
+          createdAt: new Date(),
+          isMock: true,
+          conversationId: mention.conversationId,
+          inReplyToId: parentTweetId,
+          metrics: {
+            likeCount: 0,
+            replyCount: 0,
+            retweetCount: 0
+          }
+        }
+      });
+    } else {
+      // For real tweets, post to X API
+      const tweet = await amariel.postTweet(
+        response.content, 
+        mention.conversationId, 
+        false,
+        undefined,
+        parentTweetId
+      );
+      tweetRecord = tweet;
+    }
+
+    // Update the mention status
     await prisma.mention.update({
       where: { id: mentionId },
       data: {
         status: MentionStatus.RESPONDED,
         processedAt: new Date(),
         response: {
-          create: {
-            id: responseId,
-            text: response.content,
-            authorId: process.env.X_USER_ID!,
-            authorName: process.env.X_USER_NAME || 'Amariel',
-            username: process.env.X_USER_USERNAME || 'SentientAmariel',
-            createdAt: new Date(),
-            isMock,
-            conversationId: mention.conversationId,
-            inReplyToId: mention.originalTweet?.id,
-            metrics: {
-              likeCount: 0,
-              replyCount: 0,
-              retweetCount: 0
-            }
-          }
+          connect: { id: tweetRecord.id }
         }
       }
     });
 
-    console.log('Response posted successfully');
     return res.status(200).json({
       message: 'Response posted successfully',
-      tweet
+      tweet: tweetRecord
     });
   } catch (error) {
     console.error('Error posting response:', error);
