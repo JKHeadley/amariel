@@ -3,24 +3,39 @@ import { XConfig } from './types';
 import { prisma } from '@/lib/db';
 import { Prisma, PrismaClient, Tweet as PrismaTweet } from '@prisma/client';
 
+interface TwitterUser {
+  id: string;
+  name: string;
+  username: string;
+}
+
 interface TwitterAPITweet {
   id: string;
   text: string;
   author_id: string;
   created_at: string;
   public_metrics?: {
-    reply_count: number;
     retweet_count: number;
+    reply_count: number;
     like_count: number;
+    quote_count: number;
   };
+  referenced_tweets?: Array<{
+    type: 'replied_to' | 'quoted' | 'retweeted';
+    id: string;
+  }>;
 }
 
 interface TwitterResponse {
   data: TwitterAPITweet[];
-  meta: {
+  includes?: {
+    users?: TwitterUser[];
+  };
+  meta?: {
     result_count: number;
     newest_id: string;
     oldest_id: string;
+    next_token?: string;
   };
 }
 
@@ -434,8 +449,79 @@ export class XAPIService {
   }
 
   private async fetchMentionsFromAPI() {
-    // Implementation for real API calls
-    return [];
+    const userId = process.env.X_USER_ID;
+    if (!userId) {
+      throw new Error('X_USER_ID is required to fetch mentions');
+    }
+
+    const url = `https://api.twitter.com/2/users/${userId}/mentions`;
+    const params = new URLSearchParams({
+      'tweet.fields': 'created_at,public_metrics,referenced_tweets,author_id',
+      'user.fields': 'name,username',
+      'expansions': 'author_id',
+      'max_results': '10'
+    });
+
+    const response = await this.makeAuthenticatedRequest(url, 'GET', params);
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw {
+        status: response.status,
+        response,
+        message: error.detail || 'Failed to fetch mentions'
+      };
+    }
+
+    const data = await response.json() as TwitterResponse;
+    console.log('Raw X API Response:', JSON.stringify(data, null, 2));
+
+    if (!data.data) {
+      return [];
+    }
+
+    // Cache all mentions in our database
+    const cachedMentions = await Promise.all(
+      data.data.map(async tweet => {
+        console.log('Processing tweet:', JSON.stringify(tweet, null, 2));
+        
+        // Find the author info from the includes.users array
+        const author = data.includes?.users?.find(user => user.id === tweet.author_id);
+        console.log('Found author:', author);
+
+        if (!tweet.author_id) {
+          console.warn(`Tweet ${tweet.id} has no author_id, skipping`);
+          return null;
+        }
+
+        return prisma.mention.upsert({
+          where: { id: tweet.id },
+          update: {
+            text: tweet.text,
+            authorId: tweet.author_id,
+            authorName: author?.name || 'unknown',
+            username: author?.username || 'unknown',
+            status: 'PENDING',
+            type: tweet.referenced_tweets?.some(ref => ref.type === 'replied_to') ? 'REPLY' : 'MENTION',
+          },
+          create: {
+            id: tweet.id,
+            text: tweet.text,
+            authorId: tweet.author_id,
+            authorName: author?.name || 'unknown',
+            username: author?.username || 'unknown',
+            createdAt: new Date(tweet.created_at),
+            status: 'PENDING',
+            type: tweet.referenced_tweets?.some(ref => ref.type === 'replied_to') ? 'REPLY' : 'MENTION',
+            inReplyToId: tweet.referenced_tweets?.find(ref => ref.type === 'replied_to')?.id,
+          }
+        });
+      })
+    );
+
+    const validMentions = cachedMentions.filter(mention => mention !== null);
+    console.log(`✅ Cached ${validMentions.length} mentions from X API`);
+    return validMentions;
   }
 
   private async fetchMockMentions() {

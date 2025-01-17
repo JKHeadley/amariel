@@ -1,9 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../../auth/[...nextauth]';
+import { authOptions } from '@/pages/api/auth/[...nextauth]';
 import { prisma } from '@/lib/db';
-import { nanoid } from 'nanoid';
-import { InteractionType } from '@prisma/client';
 
 export default async function handler(
   req: NextApiRequest,
@@ -18,91 +16,47 @@ export default async function handler(
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  const { text, inReplyToId, type } = req.body;
+
   try {
-    const { type, text, username, replyToId } = req.body;
-
-    // Generate a mock tweet ID
-    const tweetId = `mock_${nanoid()}`;
-    const timestamp = new Date();
-
-    if (type === 'REPLY' && replyToId) {
-      // Fetch the original tweet to get its conversation ID
-      const originalTweet = await prisma.tweet.findUnique({
-        where: { id: replyToId }
-      });
-
-      if (!originalTweet) {
-        return res.status(404).json({ error: 'Original tweet not found' });
-      }
-
-      // Create a mock reply
-      const reply = await prisma.tweet.create({
+    if (type === 'mention') {
+      // Create a mention
+      const mention = await prisma.mention.create({
         data: {
-          id: tweetId,
+          id: `mock_${Math.random().toString(36).substring(2)}`,
           text,
-          authorId: `mock_${username}`,
-          createdAt: timestamp,
+          authorId: 'mock_user',
+          authorName: 'Mock User',
+          createdAt: new Date(),
           isMock: true,
-          conversationId: originalTweet.conversationId || originalTweet.id,
-          inReplyToId: replyToId,
-          metrics: {
-            replyCount: 0,
-            retweetCount: 0,
-            likeCount: 0
-          }
-        }
-      });
-
-      // Create a mention to trigger Amariel's response
-      await prisma.mention.create({
-        data: {
-          id: `mock_mention_${nanoid()}`,
-          text,
-          authorId: `mock_${username}`,
-          createdAt: timestamp,
-          isMock: true,
-          conversationId: reply.conversationId,
-          inReplyToId: replyToId,
-          type: InteractionType.REPLY,
+          type: 'MENTION',
           status: 'PENDING',
-          statusReason: 'Mock reply created for testing'
-        }
+          ...(inReplyToId && {
+            inReplyToId,
+            type: 'REPLY',
+          }),
+        },
       });
-
-      return res.status(200).json(reply);
+      return res.status(200).json(mention);
     } else {
-      // Create a mock mention tweet
+      // Create a tweet
       const tweet = await prisma.tweet.create({
         data: {
-          id: tweetId,
+          id: `mock_${Math.random().toString(36).substring(2)}`,
           text,
-          authorId: `mock_${username}`,
-          createdAt: timestamp,
+          authorId: process.env.X_USER_ID!,
+          authorName: process.env.X_AUTHOR_NAME!,
+          username: process.env.X_USERNAME!,
+          createdAt: new Date(),
           isMock: true,
-          conversationId: tweetId,  // New conversation
+          inReplyToId,
           metrics: {
             replyCount: 0,
             retweetCount: 0,
-            likeCount: 0
-          }
-        }
+            likeCount: 0,
+          },
+        },
       });
-
-      // Create a mention to trigger Amariel's response
-      await prisma.mention.create({
-        data: {
-          id: `mock_mention_${nanoid()}`,
-          text,
-          authorId: `mock_${username}`,
-          createdAt: timestamp,
-          isMock: true,
-          conversationId: tweet.id,
-          type: InteractionType.MENTION,
-          status: 'PENDING',
-          statusReason: 'Mock mention created for testing'
-        }
-      });
-
       return res.status(200).json(tweet);
     }
   } catch (error) {

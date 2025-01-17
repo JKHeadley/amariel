@@ -127,6 +127,7 @@ model Tweet {
   text           String
   authorId       String
   authorName     String    @default("unknown")// Display name for the author
+  username       String    @default("unknown")  // Twitter handle (@username)
   createdAt      DateTime
   cachedAt       DateTime  @default(now())
   conversationId String?   // ID of the root tweet in the thread
@@ -161,7 +162,8 @@ model Mention {
   id             String          @id
   text           String
   authorId       String
-  authorName     String          @default("unknown")// Display name for the author
+  authorName     String          @default("unknown")  // Display name for the author
+  username       String          @default("unknown")  // Twitter handle (@username)
   createdAt      DateTime
   cachedAt       DateTime        @default(now())
   conversationId String?         // ID of the thread this mention belongs to

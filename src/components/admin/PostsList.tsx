@@ -23,6 +23,7 @@ interface Post {
   isMock?: boolean;
   inReplyToId?: string | null;
   conversationId?: string | null;
+  type?: 'MENTION' | 'REPLY' | 'POST';
 }
 
 interface Thread {
@@ -154,6 +155,7 @@ export function PostsList() {
   const [selectedThread, setSelectedThread] = useState<Post[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [replyToPost, setReplyToPost] = useState<Post | null>(null);
+  const [mentionModalOpen, setMentionModalOpen] = useState(false);
 
   useEffect(() => {
     fetchPosts();
@@ -167,7 +169,10 @@ export function PostsList() {
       const response = await fetch('/api/admin/x/posts');
       if (!response.ok) throw new Error('Failed to fetch posts');
       const data = await response.json();
-      setPosts(data.posts.filter((p: Post) => !p.inReplyToId));
+      setPosts(data.posts.filter((p: Post) => 
+        !p.inReplyToId && // Not a reply
+        !('type' in p && p.type === 'MENTION') // Not a mention
+      ));
     } catch (error) {
       toast.error('Failed to fetch posts');
     }
@@ -219,36 +224,61 @@ export function PostsList() {
     }
   };
 
-  const renderPost = (post: Post) => (
-    <Card 
-      key={post.id} 
-      className={`hover:bg-accent/50 cursor-pointer transition-colors ${post.isMock ? 'border-blue-500' : ''}`}
-      onClick={(e) => {
-        if ((e.target as HTMLElement).closest('button')) return;
-        handlePostClick(post);
-      }}
-    >
-      <CardContent className="p-6">
-        <div className="flex justify-between items-start mb-3">
-          <div>
-            <div className="font-bold text-lg">{post.authorName}</div>
-            <div className="text-sm text-muted-foreground">@{post.authorId}</div>
+  const renderPost = (post: Post | Mention) => {
+    // Helper to safely get metrics
+    const getMetrics = (item: Post | Mention) => {
+      if ('metrics' in item && item.metrics) {
+        return item.metrics as { replyCount: number; retweetCount: number; likeCount: number };
+      }
+      return { replyCount: 0, retweetCount: 0, likeCount: 0 };
+    };
+
+    const metrics = getMetrics(post);
+
+    return (
+      <Card 
+        key={post.id} 
+        className={`hover:bg-accent/50 cursor-pointer transition-colors ${post.isMock ? 'border-blue-500' : ''}`}
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest('button')) return;
+          handlePostClick(post);
+        }}
+      >
+        <CardContent className="p-6">
+          <div className="flex justify-between items-start mb-3">
+            <div>
+              <div className="font-bold text-lg">{post.authorName}</div>
+              <div className="text-sm text-muted-foreground">@{post.authorId}</div>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
+            </div>
           </div>
-          <div className="text-sm text-muted-foreground">
-            {formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
+          <p className="mb-4 text-base">{post.text}</p>
+          <div className="flex gap-4">
+            <button 
+              className="flex items-center gap-1 hover:text-primary transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                setReplyToPost(post);
+              }}
+            >
+              <MessageCircle className="h-4 w-4" />
+              <span>{metrics.replyCount}</span>
+            </button>
+            <button className="flex items-center gap-1 hover:text-primary transition-colors">
+              <Repeat className="h-4 w-4" />
+              <span>{metrics.retweetCount}</span>
+            </button>
+            <button className="flex items-center gap-1 hover:text-primary transition-colors">
+              <Heart className="h-4 w-4" />
+              <span>{metrics.likeCount}</span>
+            </button>
           </div>
-        </div>
-        <p className="mb-4 text-base">{post.text}</p>
-        <PostActions 
-          post={post} 
-          onReplyClick={(e) => {
-            e.stopPropagation();
-            setReplyToPost(post);
-          }}
-        />
-      </CardContent>
-    </Card>
-  );
+        </CardContent>
+      </Card>
+    );
+  };
 
   const renderThread = (thread: Thread) => (
     <div key={thread.reply.id} className="space-y-4">
@@ -312,12 +342,21 @@ export function PostsList() {
     <>
       <div className="h-[calc(100vh-4rem)]">
         <Tabs defaultValue="posts" className="h-full flex flex-col">
-          <TabsList className="mx-4 mb-4">
-            <TabsTrigger value="posts">Posts</TabsTrigger>
-            <TabsTrigger value="replies">Replies</TabsTrigger>
-            <TabsTrigger value="mentions">Mentions</TabsTrigger>
-            <TabsTrigger value="pending">Pending</TabsTrigger>
-          </TabsList>
+          <div className="flex justify-between items-center mx-4 mb-4">
+            <TabsList>
+              <TabsTrigger value="posts">Posts</TabsTrigger>
+              <TabsTrigger value="replies">Replies</TabsTrigger>
+              <TabsTrigger value="mentions">Mentions</TabsTrigger>
+              <TabsTrigger value="pending">Pending</TabsTrigger>
+            </TabsList>
+            <Button 
+              variant="outline"
+              onClick={() => setMentionModalOpen(true)}
+              className="ml-4"
+            >
+              Mock Mention
+            </Button>
+          </div>
 
           <div className="flex-grow overflow-hidden">
             <TabsContent value="posts" className="h-full m-0">
@@ -355,16 +394,30 @@ export function PostsList() {
         </Tabs>
       </div>
 
+      {replyToPost && (
+        <TweetComposeModal
+          open={!!replyToPost}
+          onClose={() => setReplyToPost(null)}
+          inReplyToId={replyToPost.id}
+          inReplyToText={replyToPost.text}
+          onSuccess={() => {
+            fetchPosts();
+            fetchReplies();
+            fetchMentions();
+          }}
+          type="reply"
+        />
+      )}
+
       <TweetComposeModal
-        open={replyToPost !== null}
-        onClose={() => setReplyToPost(null)}
-        inReplyToId={replyToPost?.id}
-        inReplyToText={replyToPost?.text}
+        open={mentionModalOpen}
+        onClose={() => setMentionModalOpen(false)}
         onSuccess={() => {
           fetchPosts();
           fetchReplies();
           fetchMentions();
         }}
+        type="mention"
       />
     </>
   );
