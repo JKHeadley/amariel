@@ -18,7 +18,8 @@ export default async function handler(
   }
 
   try {
-    const mentions = await prisma.mention.findMany({
+    // Get pending mentions (direct mentions and replies)
+    const pendingMentions = await prisma.mention.findMany({
       where: {
         OR: [
           { status: MentionStatus.PENDING },
@@ -26,16 +27,64 @@ export default async function handler(
           { status: MentionStatus.FAILED }
         ]
       },
-      orderBy: [
-        { status: 'asc' },  // Show PENDING first, then PROCESSING, then FAILED
-        { createdAt: 'desc' }
-      ],
       include: {
+        originalTweet: true,
         response: true
       }
     });
 
-    return res.status(200).json({ mentions });
+    // Get unanswered replies to Amariel's posts
+    const unansweredReplies = await prisma.tweet.findMany({
+      where: {
+        AND: [
+          { inReplyToId: { not: null } },  // Is a reply
+          { 
+            parentTweet: {
+              authorId: process.env.X_USER_ID  // Parent tweet is by Amariel
+            }
+          },
+          { 
+            NOT: {
+              mentions: {
+                some: {
+                  type: 'REPLY',
+                  OR: [
+                    { status: MentionStatus.RESPONDED },
+                    { status: MentionStatus.PROCESSING },
+                    { status: MentionStatus.IGNORED }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      include: {
+        parentTweet: true
+      }
+    });
+
+    // Convert unanswered replies to mentions format
+    const replyMentions = unansweredReplies.map(reply => ({
+      id: `pending_reply_${reply.id}`,
+      text: reply.text,
+      authorId: reply.authorId,
+      authorName: reply.authorName,
+      username: reply.username,
+      createdAt: reply.createdAt,
+      status: MentionStatus.PENDING,
+      type: 'REPLY',
+      isMock: reply.isMock,
+      originalTweet: reply.parentTweet,
+      response: null
+    }));
+
+    // Combine and sort all pending interactions
+    const allPending = [...pendingMentions, ...replyMentions].sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+    );
+
+    return res.status(200).json({ mentions: allPending });
   } catch (error) {
     console.error('Error fetching pending mentions:', error);
     return res.status(500).json({ error: 'Internal server error' });

@@ -302,8 +302,11 @@ export function PostsList() {
     <Card key={mention.id} className="mb-4">
       <CardContent className="p-4">
         <div className="flex justify-between items-start mb-2">
-          <div className="font-bold">{mention.authorId}</div>
-          <div className="text-sm text-gray-500">
+          <div>
+            <div className="font-bold text-lg">{mention.authorName}</div>
+            <div className="text-sm text-muted-foreground">@{mention.username}</div>
+          </div>
+          <div className="text-sm text-muted-foreground">
             {formatDistanceToNow(new Date(mention.createdAt), { addSuffix: true })}
           </div>
         </div>
