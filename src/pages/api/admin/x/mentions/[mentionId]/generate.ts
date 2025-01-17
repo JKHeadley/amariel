@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/pages/api/auth/[...nextauth]';
 import { prisma } from '@/lib/db';
 import { ChatType, MentionStatus } from '@prisma/client';
+import { AmarielService } from '@/services/amariel-service';
+import { AIProviderType } from '@/services/ai/provider-factory';
 
 export default async function handler(
   req: NextApiRequest,
@@ -42,7 +44,7 @@ export default async function handler(
       // Create a mention record for this reply if it doesn't exist
       mention = await prisma.mention.create({
         data: {
-          id: mentionId,
+          id: `mention_${tweet.id}`,
           text: tweet.text,
           authorId: tweet.authorId,
           authorName: tweet.authorName,
@@ -100,6 +102,38 @@ export default async function handler(
       }
     });
 
+    // Initialize Amariel service
+    const amariel = new AmarielService(
+      (process.env.AI_PROVIDER_TYPE as AIProviderType) || 'openai',
+      {
+        apiKey: process.env.OPENAI_API_KEY!,
+        model: process.env.NEXT_PUBLIC_GPT4O_MODEL || 'gpt-4'
+      },
+      {
+        apiKey: process.env.X_API_KEY!,
+        apiSecret: process.env.X_API_SECRET!,
+        accessToken: process.env.X_ACCESS_TOKEN!,
+        accessTokenSecret: process.env.X_ACCESS_TOKEN_SECRET!,
+        dryRun: process.env.DRY_RUN === 'true'
+      }
+    );
+
+    // Generate initial response
+    const response = await amariel.generateResponse([{
+      role: 'system',
+      content: chat.messages[0].content
+    }]);
+
+    // Save the AI response
+    const aiMessage = await prisma.message.create({
+      data: {
+        chatId: chat.id,
+        role: 'ASSISTANT',
+        content: response,
+        userId: session.user.id,
+      }
+    });
+
     // Update mention status to PROCESSING
     await prisma.mention.update({
       where: { id: mention.id },
@@ -110,7 +144,13 @@ export default async function handler(
       }
     });
 
-    return res.status(200).json({ chat });
+    // Return both the chat and the generated response
+    return res.status(200).json({ 
+      chat: {
+        ...chat,
+        messages: [...chat.messages, aiMessage]
+      } 
+    });
   } catch (error) {
     console.error('Error generating response:', error);
     return res.status(500).json({ error: 'Internal server error' });

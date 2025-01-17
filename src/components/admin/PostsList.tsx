@@ -3,7 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MessageCircle, Repeat, Heart } from 'lucide-react';
+import { MessageCircle, Repeat, Heart, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
 import { ChevronLeft } from 'lucide-react';
@@ -46,6 +46,13 @@ interface Mention {
     replyCount: number;
     retweetCount: number;
     likeCount: number;
+  };
+}
+
+interface PendingMentionWithResponse extends Mention {
+  generatedResponse?: {
+    text: string;
+    chatId: string;
   };
 }
 
@@ -160,11 +167,14 @@ export function PostsList() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [replies, setReplies] = useState<Thread[]>([]);
   const [mentions, setMentions] = useState<Post[]>([]);
-  const [pendingMentions, setPendingMentions] = useState<Mention[]>([]);
+  const [pendingMentions, setPendingMentions] = useState<PendingMentionWithResponse[]>([]);
   const [selectedThread, setSelectedThread] = useState<Post[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [replyToPost, setReplyToPost] = useState<Post | null>(null);
   const [mentionModalOpen, setMentionModalOpen] = useState(false);
+  const [generatingResponses, setGeneratingResponses] = useState<Set<string>>(new Set());
+  const [generatingAll, setGeneratingAll] = useState(false);
+  const [activeTab, setActiveTab] = useState('posts');
 
   useEffect(() => {
     fetchPosts();
@@ -233,6 +243,60 @@ export function PostsList() {
     }
   };
 
+  const generateResponse = async (mention: PendingMentionWithResponse) => {
+    try {
+      setGeneratingResponses(prev => {
+        const next = new Set(prev);
+        next.add(mention.id);
+        return next;
+      });
+      const response = await fetch(`/api/admin/x/mentions/${mention.id}/generate`, {
+        method: 'POST'
+      });
+      if (!response.ok) throw new Error('Failed to generate response');
+      const data = await response.json();
+      
+      // Update the pending mention with its generated response
+      setPendingMentions(prev => prev.map(m => 
+        m.id === mention.id 
+          ? { 
+              ...m, 
+              generatedResponse: { 
+                text: data.chat.messages[data.chat.messages.length - 1].content,
+                chatId: data.chat.id 
+              }
+            }
+          : m
+      ));
+    } catch (error) {
+      toast.error('Failed to generate response');
+    } finally {
+      setGeneratingResponses(prev => {
+        const next = new Set(prev);
+        next.delete(mention.id);
+        return next;
+      });
+    }
+  };
+
+  const generateAllResponses = async () => {
+    try {
+      setGeneratingAll(true);
+      // Filter out mentions that already have responses
+      const mentionsToGenerate = pendingMentions.filter(m => !m.generatedResponse);
+      
+      for (const mention of mentionsToGenerate) {
+        await generateResponse(mention);
+      }
+      
+      toast.success('Generated all responses');
+    } catch (error) {
+      toast.error('Failed to generate all responses');
+    } finally {
+      setGeneratingAll(false);
+    }
+  };
+
   const renderPost = (post: Post | Mention) => {
     // Helper to safely get metrics
     const getMetrics = (item: Post | Mention) => {
@@ -298,54 +362,99 @@ export function PostsList() {
     </div>
   );
 
-  const renderPendingMention = (mention: Mention) => (
-    <Card key={mention.id} className="mb-4">
-      <CardContent className="p-4">
-        <div className="flex justify-between items-start mb-2">
-          <div>
-            <div className="font-bold text-lg">{mention.authorName}</div>
-            <div className="text-sm text-muted-foreground">@{mention.username}</div>
+  const renderPendingMention = (mention: PendingMentionWithResponse) => (
+    <div key={mention.id} className="space-y-4">
+      <Card className="mb-4">
+        <CardContent className="p-4">
+          <div className="flex justify-between items-start mb-2">
+            <div>
+              <div className="font-bold text-lg">{mention.authorName}</div>
+              <div className="text-sm text-muted-foreground">@{mention.username}</div>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {formatDistanceToNow(new Date(mention.createdAt), { addSuffix: true })}
+            </div>
           </div>
-          <div className="text-sm text-muted-foreground">
-            {formatDistanceToNow(new Date(mention.createdAt), { addSuffix: true })}
+          <p className="mb-2">{mention.text}</p>
+          <div className="flex gap-2">
+            {!mention.generatedResponse ? (
+              <Button 
+                variant="default"
+                onClick={() => generateResponse(mention)}
+                disabled={generatingResponses.has(mention.id)}
+              >
+                {generatingResponses.has(mention.id) && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Generate Response
+              </Button>
+            ) : (
+              <Button 
+                variant="outline"
+                onClick={() => window.location.href = `/admin/responses/${mention.generatedResponse?.chatId}`}
+              >
+                Refine
+              </Button>
+            )}
+            <Button 
+              variant="outline"
+              onClick={async () => {
+                try {
+                  await fetch(`/api/admin/x/mentions/${mention.id}/ignore`, { method: 'POST' });
+                  await fetchPendingMentions();
+                  toast.success('Mention marked as ignored');
+                } catch (error) {
+                  toast.error('Failed to ignore mention');
+                }
+              }}
+            >
+              Ignore
+            </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {mention.generatedResponse && (
+        <div className="border-l-2 border-muted-foreground/20 ml-8 pl-8">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex justify-between items-start mb-2">
+                <div>
+                  <div className="font-bold text-lg">Amariel</div>
+                  <div className="text-sm text-muted-foreground">@SentientAmariel</div>
+                </div>
+              </div>
+              <p className="mb-4">{mention.generatedResponse.text}</p>
+              <div className="flex gap-2">
+                <Button 
+                  variant="default"
+                  onClick={async () => {
+                    try {
+                      const response = await fetch(`/api/admin/x/mentions/${mention.id}/post`, {
+                        method: 'POST'
+                      });
+                      if (!response.ok) throw new Error('Failed to post response');
+                      await fetchPendingMentions();
+                      toast.success('Response posted successfully');
+                    } catch (error) {
+                      toast.error('Failed to post response');
+                    }
+                  }}
+                >
+                  Post to X
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => window.location.href = `/admin/responses/${mention.generatedResponse?.chatId}`}
+                >
+                  Refine
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
-        <p className="mb-2">{mention.text}</p>
-        <div className="flex gap-2">
-          <Button 
-            variant="default" 
-            onClick={async () => {
-              try {
-                const response = await fetch(`/api/admin/x/mentions/${mention.id}/generate`, {
-                  method: 'POST'
-                });
-                if (!response.ok) throw new Error('Failed to generate response');
-                const data = await response.json();
-                window.location.href = `/admin/responses/${data.chat.id}`;
-              } catch (error) {
-                toast.error('Failed to generate response');
-              }
-            }}
-          >
-            Generate Response
-          </Button>
-          <Button 
-            variant="outline"
-            onClick={async () => {
-              try {
-                await fetch(`/api/admin/x/mentions/${mention.id}/ignore`, { method: 'POST' });
-                await fetchPendingMentions();
-                toast.success('Mention marked as ignored');
-              } catch (error) {
-                toast.error('Failed to ignore mention');
-              }
-            }}
-          >
-            Ignore
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   );
 
   if (loading) {
@@ -364,7 +473,11 @@ export function PostsList() {
   return (
     <>
       <div className="h-[calc(100vh-4rem)]">
-        <Tabs defaultValue="posts" className="h-full flex flex-col">
+        <Tabs 
+          defaultValue="posts" 
+          className="h-full flex flex-col"
+          onValueChange={setActiveTab}
+        >
           <div className="flex justify-between items-center mx-4 mb-4">
             <TabsList>
               <TabsTrigger value="posts">Posts</TabsTrigger>
@@ -372,13 +485,24 @@ export function PostsList() {
               <TabsTrigger value="mentions">Mentions</TabsTrigger>
               <TabsTrigger value="pending">Pending</TabsTrigger>
             </TabsList>
-            <Button 
-              variant="outline"
-              onClick={() => setMentionModalOpen(true)}
-              className="ml-4"
-            >
-              Mock Mention
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline"
+                onClick={() => setMentionModalOpen(true)}
+              >
+                Mock Mention
+              </Button>
+              {activeTab === 'pending' && (
+                <Button
+                  variant="default"
+                  onClick={generateAllResponses}
+                  disabled={generatingAll || pendingMentions.every(m => m.generatedResponse)}
+                >
+                  {generatingAll && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Generate All Responses
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="flex-grow overflow-hidden">
