@@ -44,9 +44,9 @@ export default async function handler(
         data: {
           id: `mock_${Math.random().toString(36).substring(2)}`,
           text,
-          authorId: process.env.X_USER_ID!,
-          authorName: process.env.X_AUTHOR_NAME!,
-          username: process.env.X_USERNAME!,
+          authorId: 'mock_user',
+          authorName: 'Mock User',
+          username: 'mock_user123',
           createdAt: new Date(),
           isMock: true,
           inReplyToId,
