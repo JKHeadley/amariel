@@ -96,7 +96,24 @@ UI Components
 
 System Architecture
 
-1. AI Provider Abstraction
+1. Post Management System
+The system manages X/Twitter interactions through two primary models:
+
+Tweet Model
+- Represents actual posts on X platform
+- Stores raw tweet data and metrics
+- Manages thread relationships via conversationId/inReplyToId
+- Links to refinement chats for content creation
+
+Mention Model
+- Acts as a metadata wrapper for tweets requiring attention
+- Tracks interaction status and type
+- Manages response workflows
+- Links original tweets to responses
+
+For detailed post management documentation, see docs/post_management_and_architecture.md
+
+2. AI Provider Abstraction
 The system now supports multiple AI providers through a common interface:
 
 interface AIProvider {
@@ -113,7 +130,7 @@ Provider Configuration:
 - Easy to add new providers
 - Consistent interface across providers
 
-2. Core Services
+3. Core Services
 
 AmarielService
 - Manages AI provider selection and configuration
@@ -128,7 +145,7 @@ XAPIService
 - Handles tweet posting and interactions
 - Provides console mode for testing
 
-3. Prompt Management
+4. Prompt Management
 New structured prompt system:
 - Configurable system prompts
 - Personality traits
@@ -136,7 +153,7 @@ New structured prompt system:
 - Response constraints
 - Context management
 
-4. API Endpoints
+5. API Endpoints
 
 Chat Endpoints
 - /api/chat - Main chat interaction endpoint
@@ -144,10 +161,17 @@ Chat Endpoints
 - /api/webhook - Handles X/Twitter webhooks
 - /api/thought - Generates and posts original thoughts
 
+X/Twitter Endpoints
+- /api/admin/x/posts - Manages Amariel's posts
+- /api/admin/x/mentions - Handles mentions and replies
+- /api/admin/x/mentions/pending - Lists pending interactions
+- /api/admin/x/posts/[postId]/thread - Retrieves thread context
+- /api/admin/x/mock-interaction - Creates mock interactions for testing
+
 Health Endpoints
 - /api/health/ollama - Checks local AI server status
 
-5. Data Flow
+6. Data Flow
 
 1. Chat Initialization
    - Client requests new chat session
@@ -162,14 +186,32 @@ Health Endpoints
    - Stores response in database
    - Returns response to client
 
-3. X/Twitter Integration
-   - Webhook receives mention
-   - System creates/retrieves user record
-   - Processes mention as message
-   - Generates and posts response
-   - Stores interaction in database
+3. X/Twitter Interaction Flow
+   a. Receiving Interactions
+      - System receives mention/reply via webhook
+      - Creates Tweet record for the interaction
+      - Creates corresponding Mention record with PENDING status
+      - Appears in admin pending queue
 
-6. Key Features
+   b. Response Generation
+      - Admin initiates response through chat interface
+      - Creates X_RESPONSE type chat for drafting
+      - AI assists in crafting appropriate response
+      - Response is reviewed and approved
+
+   c. Publishing Response
+      - System creates new Tweet for response
+      - Updates Mention status to RESPONDED
+      - Links response Tweet to original Mention
+      - Posts response to X platform
+
+   d. Thread Management
+      - System maintains conversation threads
+      - Links replies using conversationId
+      - Tracks parent-child relationships with inReplyToId
+      - Preserves thread context for future interactions
+
+7. Key Features
 
 AI Provider Management
 - Multiple provider support
