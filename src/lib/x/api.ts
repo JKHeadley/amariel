@@ -70,7 +70,7 @@ export async function fetchTweetsFromX() {
           id: tweet.id,
           text: tweet.text,
           authorId: process.env.X_USER_ID!,
-          authorName: process.env.X_USERNAME || 'Amariel',
+          authorName: process.env.X_AUTHOR_NAME || 'Sentient_AI_Amariel',
           username: process.env.X_USERNAME || 'SentientAmariel',
           createdAt: new Date(tweet.createdAt),
           cachedAt: new Date(),
@@ -82,7 +82,7 @@ export async function fetchTweetsFromX() {
         },
         update: {
           text: tweet.text,
-          authorName: process.env.X_USERNAME || 'Amariel',
+          authorName: process.env.X_AUTHOR_NAME || 'Sentient_AI_Amariel',
           username: process.env.X_USERNAME || 'SentientAmariel',
           cachedAt: new Date(),
           metrics
