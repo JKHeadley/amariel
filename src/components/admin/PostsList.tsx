@@ -62,6 +62,7 @@ function ThreadView({ thread, onBack }: { thread: Post[]; onBack: () => void }) 
 
   const handlePostClick = async (post: Post) => {
     try {
+      console.log('🔍 Fetching thread for post:', post.id);
       const response = await fetch(`/api/admin/x/posts/${post.id}/thread`);
       if (!response.ok) throw new Error('Failed to fetch thread');
       const data = await response.json();
@@ -178,9 +179,10 @@ export function PostsList() {
 
   useEffect(() => {
     fetchPosts();
-    fetchReplies();
-    fetchMentions();
-    fetchPendingMentions();
+    // Temporarily disable fetching replies, mentions, and pending mentions
+    // fetchReplies();
+    // fetchMentions();
+    // fetchPendingMentions();
   }, []);
 
   const fetchPosts = async () => {

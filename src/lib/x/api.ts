@@ -1,6 +1,28 @@
 import { AmarielService } from '@/services/amariel-service';
 import { AIProviderType } from '@/services/ai/provider-factory';
 import { prisma } from '@/lib/db';
+import { Tweet, Mention } from '@prisma/client';
+
+// Define the TwitterAPITweet interface here since it's not exported from x-api
+interface TwitterUser {
+  id: string;
+  name: string;
+  username: string;
+}
+
+interface TwitterAPITweet {
+  id: string;
+  text: string;
+  author_id: string;
+  created_at: string;
+  includes?: {
+    users?: TwitterUser[];
+  };
+  referenced_tweets?: Array<{
+    type: 'replied_to' | 'quoted' | 'retweeted';
+    id: string;
+  }>;
+}
 
 function getAmarielService() {
   return new AmarielService(
@@ -28,47 +50,42 @@ async function handleXAPIError(error: any, fallbackFn: () => Promise<any>) {
 }
 
 export async function fetchTweetsFromX() {
+  console.log('🔍 Fetching tweets from X');
   const amariel = getAmarielService();
   try {
+    // @ts-ignore - xApi is private but we need to access it here
     const tweets = await amariel.xApi.getUserTweets();
 
     // Update our cache with new tweets
     for (const tweet of tweets) {
+      const metrics = {
+        replyCount: (tweet as any).metrics?.replyCount ?? 0,
+        retweetCount: (tweet as any).metrics?.retweetCount ?? 0,
+        likeCount: (tweet as any).metrics?.likeCount ?? 0
+      };
+
       await prisma.tweet.upsert({
         where: { id: tweet.id },
-        update: {
-          text: tweet.text,
-          metrics: tweet.metrics,
-          authorId: process.env.X_USER_ID!,
-        },
         create: {
           id: tweet.id,
           text: tweet.text,
           authorId: process.env.X_USER_ID!,
-          authorName: process.env.X_USER_NAME || 'Amariel',
+          authorName: process.env.X_USERNAME || 'Amariel',
           username: process.env.X_USERNAME || 'SentientAmariel',
           createdAt: new Date(tweet.createdAt),
           cachedAt: new Date(),
           conversationId: null,
           inReplyToId: null,
-          metrics: {
-            replyCount: tweet.public_metrics?.reply_count ?? 0,
-            retweetCount: tweet.public_metrics?.retweet_count ?? 0,
-            likeCount: tweet.public_metrics?.like_count ?? 0
-          },
+          metrics,
           published: true,
           isMock: false
         },
         update: {
           text: tweet.text,
-          authorName: process.env.X_USER_NAME || 'Amariel',
+          authorName: process.env.X_USERNAME || 'Amariel',
           username: process.env.X_USERNAME || 'SentientAmariel',
           cachedAt: new Date(),
-          metrics: {
-            replyCount: tweet.public_metrics?.reply_count ?? 0,
-            retweetCount: tweet.public_metrics?.retweet_count ?? 0,
-            likeCount: tweet.public_metrics?.like_count ?? 0
-          }
+          metrics
         }
       });
     }
@@ -86,34 +103,41 @@ export async function fetchTweetsFromX() {
 export async function fetchMentionsFromX() {
   const amariel = getAmarielService();
   try {
+    // @ts-ignore - xApi is private but we need to access it here
     const mentions = await amariel.xApi.checkAndRespondToMentions();
 
     // Update our cache with new mentions
     for (const mention of mentions) {
-      if (!mention.authorId) {
-        console.warn(`Skipping mention ${mention.id} due to missing authorId`);
+      const tweetMention = mention as TwitterAPITweet;
+      const author = tweetMention.includes?.users?.find((u: TwitterUser) => u.id === tweetMention.author_id);
+      const replyToId = tweetMention.referenced_tweets?.find((ref: { type: string; id: string }) => ref.type === 'replied_to')?.id;
+
+      if (!tweetMention.author_id) {
+        console.warn(`Skipping mention ${tweetMention.id} due to missing author_id`);
         continue;
       }
 
       await prisma.mention.upsert({
-        where: { id: mention.id },
+        where: { id: tweetMention.id },
         update: {
-          text: mention.text,
-          authorId: mention.authorId,
-          authorName: mention.authorName,
-          type: mention.inReplyToId ? 'REPLY' : 'MENTION',
+          text: tweetMention.text,
+          authorId: tweetMention.author_id,
+          authorName: author?.name || 'Unknown User',
+          username: author?.username || 'unknown',
+          type: replyToId ? 'REPLY' : 'MENTION',
           status: 'PENDING',
-          inReplyToId: mention.inReplyToId,
+          inReplyToId: replyToId
         },
         create: {
-          id: mention.id,
-          text: mention.text,
-          authorId: mention.authorId,
-          authorName: mention.authorName,
-          createdAt: new Date(mention.createdAt),
-          type: mention.inReplyToId ? 'REPLY' : 'MENTION',
+          id: tweetMention.id,
+          text: tweetMention.text,
+          authorId: tweetMention.author_id,
+          authorName: author?.name || 'Unknown User',
+          username: author?.username || 'unknown',
+          createdAt: new Date(tweetMention.created_at),
+          type: replyToId ? 'REPLY' : 'MENTION',
           status: 'PENDING',
-          inReplyToId: mention.inReplyToId,
+          inReplyToId: replyToId
         }
       });
     }
@@ -121,7 +145,6 @@ export async function fetchMentionsFromX() {
     return mentions;
   } catch (error) {
     return handleXAPIError(error, async () => {
-      // Get both mentions and replies, ordered by most recent
       return prisma.mention.findMany({
         where: {
           type: 'MENTION'  // Only get mentions, not replies

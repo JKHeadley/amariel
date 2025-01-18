@@ -1,7 +1,9 @@
 import crypto from 'crypto';
 import { XConfig } from './types';
 import { prisma } from '@/lib/db';
-import { Prisma, PrismaClient, Tweet as PrismaTweet } from '@prisma/client';
+import { Prisma, PrismaClient, Tweet as PrismaTweet, Mention } from '@prisma/client';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 interface TwitterUser {
   id: string;
@@ -14,22 +16,24 @@ interface TwitterAPITweet {
   text: string;
   author_id: string;
   created_at: string;
-  public_metrics?: {
-    retweet_count: number;
-    reply_count: number;
-    like_count: number;
-    quote_count: number;
-  };
+  conversation_id?: string;
   referenced_tweets?: Array<{
     type: 'replied_to' | 'quoted' | 'retweeted';
     id: string;
   }>;
+  public_metrics?: {
+    reply_count: number;
+    retweet_count: number;
+    like_count: number;
+  };
+  author?: TwitterUser;
 }
 
 interface TwitterResponse {
   data: TwitterAPITweet[];
   includes?: {
     users?: TwitterUser[];
+    tweets?: TwitterAPITweet[];
   };
   meta?: {
     result_count: number;
@@ -39,11 +43,25 @@ interface TwitterResponse {
   };
 }
 
+interface TweetThread {
+  conversationId: string;
+  tweets: TwitterAPITweet[];
+}
+
+interface ProcessedThread {
+  tweets: PrismaTweet[];
+  mentions: Mention[];
+}
+
+type ConversationMap = Map<string, TwitterAPITweet[]>;
+
 export class XAPIService {
   private config: XConfig;
+  private devMode: boolean;
 
   constructor(config: XConfig) {
     this.config = config;
+    this.devMode = process.env.NEXT_PUBLIC_X_API_DEV_MODE === 'true';
   }
 
   private async makeAuthenticatedRequest(
@@ -52,13 +70,18 @@ export class XAPIService {
     queryParams?: URLSearchParams,
     body?: Record<string, any>
   ) {
-    const finalUrl = queryParams ? `${url}?${queryParams.toString()}` : url;
     const paramsObject = queryParams ? Object.fromEntries(queryParams.entries()) : undefined;
     const oauthParams = this.generateOAuthParams(method, url, paramsObject, body);
     const headers = {
       'Authorization': `OAuth ${this.formatOAuthHeaders(oauthParams)}`,
       'Content-Type': 'application/json',
     };
+
+    const finalUrl = queryParams ? `${url}?${queryParams.toString()}` : url;
+
+    console.log('🔑 OAuth Params:', oauthParams);
+    console.log('🔑 Headers:', headers);
+    console.log('🔑 Final URL:', finalUrl);
 
     const requestOptions: RequestInit = {
       method,
@@ -90,10 +113,9 @@ export class XAPIService {
       oauth_version: '1.0'
     };
 
-    // Generate signature
     const params = {
+      ...queryParams,
       ...oauthParams,
-      ...(queryParams || {}),
       ...(body || {})
     };
 
@@ -103,10 +125,12 @@ export class XAPIService {
       encodeURIComponent(
         Object.keys(params)
           .sort()
-          .map(key => `${key}=${encodeURIComponent(params[key])}`)
+          .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)
           .join('&')
       )
     ].join('&');
+
+    console.log('🔑 Signature Base String:', signatureBaseString);
 
     const signingKey = `${encodeURIComponent(this.config.apiSecret)}&${encodeURIComponent(this.config.accessTokenSecret)}`;
     const signature = crypto
@@ -127,122 +151,305 @@ export class XAPIService {
       .join(', ');
   }
 
-  async getUserTweets(): Promise<PrismaTweet[]> {
-    console.log('🔍 Fetching user tweets...');
-    
-    // First get the user ID if not provided
-    let userId = process.env.X_USER_ID;
-    if (!userId) {
-      console.log('🔍 X_USER_ID not set, fetching from API...');
-      const userResponse = await this.makeAuthenticatedRequest(
-        'https://api.twitter.com/2/users/me',
-        'GET'
+  private async loadMockData(type: 'tweets' | 'mentions'): Promise<TwitterResponse> {
+    try {
+      const filePath = path.join(process.cwd(), 'data', 
+        type === 'tweets' ? 'amariel_tweets_example_response.json' : 'amariel_mentions_example_response.json'
       );
-
-      if (!userResponse.ok) {
-        const error = await userResponse.json();
-        throw {
-          status: userResponse.status,
-          response: userResponse,
-          message: error.detail || 'Failed to fetch user info'
-        };
-      }
-
-      const userData = await userResponse.json();
-      userId = userData.data.id;
-      console.log('✅ Found user ID:', userId);
+      
+      const fileContents = await fs.readFile(filePath, 'utf-8');
+      return JSON.parse(fileContents);
+    } catch (error) {
+      console.error(`Failed to load mock ${type} data:`, error);
+      return { 
+        data: [], 
+        includes: { users: [] }, 
+        meta: { 
+          result_count: 0,
+          newest_id: '0',
+          oldest_id: '0'
+        } 
+      };
     }
-
-    // Get both real tweets from X API and mock tweets from our database
-    const [apiTweets, mockTweets] = await Promise.all([
-      userId ? this.fetchTweetsFromAPI(userId) : Promise.resolve([]),
-      this.fetchMockTweets()
-    ]);
-
-    // Combine and sort by creation date
-    return [...apiTweets, ...mockTweets].sort((a, b) => 
-      b.createdAt.getTime() - a.createdAt.getTime()
-    );
   }
 
-  private async fetchTweetsFromAPI(userId: string): Promise<PrismaTweet[]> {
+  private async fetchTweetsFromAPI(userId: string): Promise<TwitterAPITweet[]> {
+    if (this.devMode) {
+      console.log('🎭 Using mock tweets data');
+      const mockData = await this.loadMockData('tweets');
+      return this.processTweetsResponse(mockData);
+    }
+
     if (!userId) {
       throw new Error('User ID is required to fetch tweets');
     }
 
-    const url = `https://api.twitter.com/2/users/${userId}/tweets`;
-    const params = new URLSearchParams({
-      'tweet.fields': 'created_at,public_metrics',
-      'max_results': '10'
-    });
-
-    const response = await this.makeAuthenticatedRequest(url, 'GET', params);
+    console.log('🔍 Fetching tweets for user:', userId);
+    const allTweets: TwitterAPITweet[] = [];
+    let nextToken: string | undefined;
     
-    if (!response.ok) {
-      const error = await response.json();
-      throw {
-        status: response.status,
-        response,
-        message: error.detail || 'Failed to fetch tweets'
-      };
-    }
+    do {
+      const url = `https://api.twitter.com/2/users/${userId}/tweets`;
+      const params = new URLSearchParams({
+        'tweet.fields': 'created_at,public_metrics,referenced_tweets,conversation_id,in_reply_to_user_id,author_id',
+        'expansions': 'author_id,referenced_tweets.id,referenced_tweets.id.author_id,in_reply_to_user_id',
+        'user.fields': 'id,name,username',
+        'max_results': '100',
+        ...(nextToken && { 'pagination_token': nextToken })
+      });
 
-    const data = await response.json() as TwitterResponse;
+      console.log('📡 Making API request:', url);
+      console.log('📝 Request params:', Object.fromEntries(params.entries()));
+      
+      const response = await this.makeAuthenticatedRequest(url, 'GET', params);
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error('❌ API request failed:', {
+          status: response.status,
+          error,
+          headers: Object.fromEntries(response.headers.entries())
+        });
+        throw {
+          status: response.status,
+          response,
+          message: error.detail || 'Failed to fetch tweets'
+        };
+      }
+
+      const data = await response.json() as TwitterResponse;
+      console.log('📥 Raw API response:', JSON.stringify(data, null, 2));
+      
+      const processedTweets = this.processTweetsResponse(data);
+      allTweets.push(...processedTweets);
+      
+      nextToken = data.meta?.next_token;
+
+      if (nextToken) {
+        console.log('⏳ Waiting for rate limit (1s) before next request...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    } while (nextToken);
+
+    console.log(`📊 Total tweets fetched: ${allTweets.length}`);
+    return allTweets;
+  }
+
+  private processTweetsResponse(data: TwitterResponse): TwitterAPITweet[] {
     if (!data.data) {
+      console.warn('⚠️ No tweet data in response');
       return [];
     }
 
-    // Cache all tweets in our database
-    const cachedTweets = await Promise.all(
-      data.data.map(tweet => 
-        prisma.tweet.upsert({
-          where: { id: tweet.id },
-          update: {
-            text: tweet.text,
-            cachedAt: new Date(),
-            authorName: process.env.X_USER_NAME || 'Amariel',
-            username: process.env.X_USERNAME || 'SentientAmariel',
-            metrics: {
-              replyCount: tweet.public_metrics?.reply_count ?? 0,
-              retweetCount: tweet.public_metrics?.retweet_count ?? 0,
-              likeCount: tweet.public_metrics?.like_count ?? 0
-            }
-          },
-          create: {
-            id: tweet.id,
-            text: tweet.text,
-            authorId: userId,
-            authorName: process.env.X_USER_NAME || 'Amariel',
-            username: process.env.X_USERNAME || 'SentientAmariel',
-            createdAt: new Date(tweet.created_at),
-            cachedAt: new Date(),
-            conversationId: null,
-            inReplyToId: null,
-            metrics: {
-              replyCount: tweet.public_metrics?.reply_count ?? 0,
-              retweetCount: tweet.public_metrics?.retweet_count ?? 0,
-              likeCount: tweet.public_metrics?.like_count ?? 0
-            },
-            published: true,
-            isMock: false
-          }
-        })
-      )
-    );
+    // Process includes data
+    const includes = data.includes || {};
+    const users = includes.users || [];
+    const referencedTweets = includes.tweets || [];
 
-    console.log(`✅ Cached ${cachedTweets.length} tweets from X API`);
-    return cachedTweets;
+    console.log('📊 Processing response with:', {
+      tweets: data.data.length,
+      users: users.length,
+      referencedTweets: referencedTweets.length
+    });
+
+    // Merge includes data into each tweet
+    return data.data.map(tweet => {
+      // Find the author from the users array
+      const author = users.find((user: TwitterUser) => user.id === tweet.author_id);
+      if (!author) {
+        console.warn(`⚠️ No author found for tweet ${tweet.id} (author_id: ${tweet.author_id})`);
+      } else {
+        console.log(`✅ Found author for tweet ${tweet.id}:`, author);
+      }
+      
+      // Process referenced tweets
+      const processedReferencedTweets = tweet.referenced_tweets?.map(ref => {
+        const referencedTweet = referencedTweets.find(t => t.id === ref.id);
+        if (!referencedTweet) {
+          console.warn(`⚠️ Referenced tweet ${ref.id} not found in includes`);
+          return ref;
+        }
+
+        // Find the author of the referenced tweet
+        const referencedAuthor = users.find((u: TwitterUser) => u.id === referencedTweet.author_id);
+        if (!referencedAuthor) {
+          console.warn(`⚠️ No author found for referenced tweet ${ref.id} (author_id: ${referencedTweet.author_id})`);
+        }
+        
+        return {
+          ...ref,
+          ...referencedTweet,
+          author: referencedAuthor
+        };
+      });
+
+      // Return the processed tweet with author information
+      return {
+        ...tweet,
+        author // Attach the author directly to the tweet
+      };
+    });
   }
 
-  private async fetchMockTweets(): Promise<PrismaTweet[]> {
-    return prisma.tweet.findMany({
+  async fetchMentionsFromAPI(): Promise<TwitterAPITweet[]> {
+    if (this.devMode) {
+      console.log('🎭 Using mock mentions data');
+      const mockData = await this.loadMockData('mentions');
+      return this.processTweetsResponse(mockData);
+    }
+
+    console.log('🔍 Fetching mentions from X API...');
+    
+    const allMentions: TwitterAPITweet[] = [];
+    let nextToken: string | undefined;
+    
+    do {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      try {
+        const url = 'https://api.twitter.com/2/tweets/search/recent';
+        const params = new URLSearchParams({
+          'query': '@SentientAmariel -is:retweet',
+          'tweet.fields': 'author_id,conversation_id,created_at,in_reply_to_user_id,referenced_tweets,public_metrics',
+          'expansions': 'author_id,referenced_tweets.id,referenced_tweets.id.author_id,in_reply_to_user_id',
+          'user.fields': 'id,name,username',
+          'max_results': '100',
+          ...(nextToken && { 'next_token': nextToken })
+        });
+
+        console.log('📡 Making API request:', url, '\nParams:', Object.fromEntries(params.entries()));
+        const response = await this.makeAuthenticatedRequest(url, 'GET', params);
+
+        if (!response.ok) {
+          const error = await response.json();
+          console.error('❌ API request failed:', {
+            status: response.status,
+            error,
+            headers: Object.fromEntries(response.headers.entries())
+          });
+          throw {
+            status: response.status,
+            response,
+            message: error.detail || 'Failed to fetch mentions'
+          };
+        }
+
+        const data = await response.json() as TwitterResponse;
+        const processedMentions = this.processTweetsResponse(data);
+        allMentions.push(...processedMentions);
+        
+        nextToken = data.meta?.next_token;
+        
+      } catch (error) {
+        console.error('❌ Error fetching mentions:', error);
+        break;
+      }
+    } while (nextToken);
+
+    console.log(`✅ Total mentions fetched: ${allMentions.length}`);
+    return allMentions;
+  }
+
+  async processMentions(rawMentions: TwitterAPITweet[]): Promise<void> {
+    console.log('🔄 Processing mentions...');
+    
+    const BATCH_SIZE = 50;
+    
+    // First ensure all referenced tweets exist
+    const referencedTweetIds = new Set(
+      rawMentions
+        .map(tweet => tweet.referenced_tweets?.find(ref => ref.type === 'replied_to')?.id)
+        .filter(id => id) as string[]
+    );
+
+    // Fetch existing tweets to avoid duplicates
+    const existingTweets = await prisma.tweet.findMany({
       where: {
-        isMock: true
-      },
-      orderBy: {
-        createdAt: 'desc'
+        id: {
+          in: Array.from(referencedTweetIds)
+        }
       }
     });
+
+    const existingTweetIds = new Set(existingTweets.map(t => t.id));
+
+    // Create missing tweets as placeholders
+    const missingTweetIds = Array.from(referencedTweetIds).filter(id => !existingTweetIds.has(id));
+    
+    for (let i = 0; i < missingTweetIds.length; i += BATCH_SIZE) {
+      const batch = missingTweetIds.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(id =>
+          prisma.tweet.create({
+            data: {
+              id,
+              text: '[Original tweet not cached]',
+              authorId: 'unknown',
+              authorName: 'Tweet not yet loaded',
+              username: 'unknown',
+              createdAt: new Date(),
+              cachedAt: new Date(),
+              published: true,
+              isMock: false,
+              metrics: {
+                replyCount: 0,
+                retweetCount: 0,
+                likeCount: 0
+              }
+            }
+          })
+        )
+      );
+    }
+
+    // Process mentions in batches
+    for (let i = 0; i < rawMentions.length; i += BATCH_SIZE) {
+      const batch = rawMentions.slice(i, i + BATCH_SIZE);
+      
+      await Promise.all(
+        batch.map(async tweet => {
+          const replyToId = tweet.referenced_tweets?.find(ref => ref.type === 'replied_to')?.id;
+          
+          try {
+            // Check if this mention already has a response
+            const existingMention = await prisma.mention.findUnique({
+              where: { id: tweet.id },
+              include: { response: true }
+            });
+
+            const status = existingMention?.response ? 'RESPONDED' : 'PENDING';
+            
+            await prisma.mention.upsert({
+              where: { id: tweet.id },
+              update: {
+                text: tweet.text,
+                authorId: tweet.author_id,
+                authorName: tweet.author?.name || 'Unknown User',
+                username: tweet.author?.username || 'unknown',
+                status,
+                type: replyToId ? 'REPLY' : 'MENTION',
+                inReplyToId: replyToId
+              },
+              create: {
+                id: tweet.id,
+                text: tweet.text,
+                authorId: tweet.author_id,
+                authorName: tweet.author?.name || 'Unknown User',
+                username: tweet.author?.username || 'unknown',
+                createdAt: new Date(tweet.created_at),
+                status,
+                type: replyToId ? 'REPLY' : 'MENTION',
+                inReplyToId: replyToId
+              }
+            });
+          } catch (error) {
+            console.error(`Error processing mention ${tweet.id}:`, error);
+          }
+        })
+      );
+    }
+    
+    console.log('✅ Finished processing mentions');
   }
 
   async postTweet(content: string, conversationId?: string, isMock: boolean = false) {
@@ -255,6 +462,8 @@ export class XAPIService {
           id: `mock_tweet_${Date.now()}`,
           text: content,
           authorId: 'mock_user',
+          authorName: process.env.X_USERNAME || 'Amariel',
+          username: process.env.X_USERNAME || 'SentientAmariel',
           createdAt: new Date(),
           cachedAt: new Date(),
           conversationId: conversationId ?? null,
@@ -303,6 +512,8 @@ export class XAPIService {
         id: tweetData.data.id,
         text: content,
         authorId: process.env.X_USER_ID!,
+        authorName: process.env.X_USERNAME || 'Amariel',
+        username: process.env.X_USERNAME || 'SentientAmariel',
         createdAt: new Date(),
         cachedAt: new Date(),
         conversationId: conversationId ?? null,
@@ -331,6 +542,8 @@ export class XAPIService {
           id: `mock_reply_${Date.now()}`,
           text: content,
           authorId: 'mock_user',
+          authorName: process.env.X_USERNAME || 'Amariel',
+          username: process.env.X_USERNAME || 'SentientAmariel',
           createdAt: new Date(),
           cachedAt: new Date(),
           conversationId: null,
@@ -361,7 +574,7 @@ export class XAPIService {
       undefined,
       { 
         text: content,
-        reply: {
+      reply: {
           in_reply_to_tweet_id: tweetId
         }
       }
@@ -384,6 +597,8 @@ export class XAPIService {
         id: replyData.data.id,
         text: content,
         authorId: process.env.X_USER_ID!,
+        authorName: process.env.X_USERNAME || 'Amariel',
+        username: process.env.X_USERNAME || 'SentientAmariel',
         createdAt: new Date(),
         cachedAt: new Date(),
         conversationId: null,
@@ -452,82 +667,6 @@ export class XAPIService {
     return [...apiMentions, ...mockMentions];
   }
 
-  private async fetchMentionsFromAPI() {
-    const userId = process.env.X_USER_ID;
-    if (!userId) {
-      throw new Error('X_USER_ID is required to fetch mentions');
-    }
-
-    const url = `https://api.twitter.com/2/users/${userId}/mentions`;
-    const params = new URLSearchParams({
-      'tweet.fields': 'created_at,public_metrics,referenced_tweets,author_id',
-      'user.fields': 'name,username',
-      'expansions': 'author_id',
-      'max_results': '10'
-    });
-
-    const response = await this.makeAuthenticatedRequest(url, 'GET', params);
-    
-    if (!response.ok) {
-      const error = await response.json();
-      throw {
-        status: response.status,
-        response,
-        message: error.detail || 'Failed to fetch mentions'
-      };
-    }
-
-    const data = await response.json() as TwitterResponse;
-    console.log('Raw X API Response:', JSON.stringify(data, null, 2));
-
-    if (!data.data) {
-      return [];
-    }
-
-    // Cache all mentions in our database
-    const cachedMentions = await Promise.all(
-      data.data.map(async tweet => {
-        console.log('Processing tweet:', JSON.stringify(tweet, null, 2));
-        
-        // Find the author info from the includes.users array
-        const author = data.includes?.users?.find(user => user.id === tweet.author_id);
-        console.log('Found author:', author);
-
-        if (!tweet.author_id) {
-          console.warn(`Tweet ${tweet.id} has no author_id, skipping`);
-          return null;
-        }
-
-        return prisma.mention.upsert({
-          where: { id: tweet.id },
-          update: {
-            text: tweet.text,
-            authorId: tweet.author_id,
-            authorName: author?.name || 'unknown',
-            username: author?.username || 'unknown',
-            status: 'PENDING',
-            type: tweet.referenced_tweets?.some(ref => ref.type === 'replied_to') ? 'REPLY' : 'MENTION',
-          },
-          create: {
-            id: tweet.id,
-            text: tweet.text,
-            authorId: tweet.author_id,
-            authorName: author?.name || 'unknown',
-            username: author?.username || 'unknown',
-            createdAt: new Date(tweet.created_at),
-            status: 'PENDING',
-            type: tweet.referenced_tweets?.some(ref => ref.type === 'replied_to') ? 'REPLY' : 'MENTION',
-            inReplyToId: tweet.referenced_tweets?.find(ref => ref.type === 'replied_to')?.id,
-          }
-        });
-      })
-    );
-
-    const validMentions = cachedMentions.filter(mention => mention !== null);
-    console.log(`✅ Cached ${validMentions.length} mentions from X API`);
-    return validMentions;
-  }
-
   private async fetchMockMentions() {
     return prisma.mention.findMany({
       where: {
@@ -542,5 +681,226 @@ export class XAPIService {
 
   async getPosts() {
     return this.getUserTweets();
+  }
+
+  async getUserTweets(): Promise<PrismaTweet[]> {
+    console.log('🔍 Starting getUserTweets...');
+    
+    const userId = process.env.X_USER_ID;
+    if (!userId) {
+      throw new Error('X_USER_ID is required to fetch tweets');
+    }
+
+    try {
+      // 1. Fetch all tweets and mentions
+      console.log('📥 Fetching all tweets and mentions...');
+      const [rawTweets, rawMentions] = await Promise.all([
+        this.fetchTweetsFromAPI(userId),
+        this.fetchMentionsFromAPI()
+      ]);
+
+      console.log('📊 Fetched counts:', {
+        tweets: rawTweets.length,
+        mentions: rawMentions.length
+      });
+
+      // 2. Combine tweets and mentions into a single list
+      const allTweets = [...rawTweets, ...rawMentions];
+
+      // 3. Create conversation map
+      const conversationMap: ConversationMap = new Map();
+      
+      allTweets.forEach(tweet => {
+        // Use either conversation_id or the tweet's own id as the conversation id
+        const conversationId = tweet.conversation_id || tweet.id;
+        
+        if (!conversationMap.has(conversationId)) {
+          conversationMap.set(conversationId, []);
+        }
+        
+        conversationMap.get(conversationId)!.push(tweet);
+      });
+
+      // 4. Sort tweets within each conversation by creation date
+      for (const [conversationId, tweets] of Array.from(conversationMap.entries())) {
+        tweets.sort((a: TwitterAPITweet, b: TwitterAPITweet) => 
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+      }
+
+      // 5. Process conversations in order and create DB records
+      const processedTweets: PrismaTweet[] = [];
+      const BATCH_SIZE = 50;
+      let currentBatch: Promise<void>[] = [];
+
+      for (const [conversationId, tweets] of Array.from(conversationMap.entries())) {
+        // Process each conversation as a batch
+        const processConversation = async () => {
+          try {
+            // First, ensure all referenced tweets exist
+            const referencedTweetIds = new Set(
+              tweets
+                .map(tweet => tweet.referenced_tweets?.find(ref => ref.type === 'replied_to')?.id)
+                .filter((id): id is string => id !== undefined)
+            );
+
+            // Create any missing referenced tweets as placeholders
+            for (const id of Array.from(referencedTweetIds)) {
+              await prisma.tweet.upsert({
+                where: { id },
+                update: {},
+                create: {
+                  id,
+                  text: '[Original tweet not cached]',
+                  authorId: 'unknown',
+                  authorName: 'Tweet not yet loaded',
+                  username: 'unknown',
+                  createdAt: new Date(),
+                  cachedAt: new Date(),
+                  published: true,
+                  isMock: false,
+                  metrics: {
+                    replyCount: 0,
+                    retweetCount: 0,
+                    likeCount: 0
+                  }
+                }
+              });
+            }
+
+            // Process tweets in chronological order
+            for (const tweet of tweets) {
+              const replyToId = tweet.referenced_tweets?.find((ref): ref is typeof ref & { id: string } => ref.type === 'replied_to')?.id;
+              const isAmarielTweet = tweet.author_id === process.env.X_USER_ID;
+
+              // Create or update the tweet
+              const dbTweet = await prisma.tweet.upsert({
+                where: { id: tweet.id },
+                update: {
+                  text: tweet.text,
+                  cachedAt: new Date(),
+                  authorId: tweet.author_id || 'unknown',
+                  authorName: tweet.author?.name || (isAmarielTweet ? process.env.X_USERNAME || 'Amariel' : 'Unknown User'),
+                  username: tweet.author?.username || (isAmarielTweet ? process.env.X_USERNAME || 'SentientAmariel' : 'unknown'),
+                  conversationId: tweet.conversation_id || null,
+                  inReplyToId: replyToId || null,
+                  metrics: {
+                    replyCount: tweet.public_metrics?.reply_count ?? 0,
+                    retweetCount: tweet.public_metrics?.retweet_count ?? 0,
+                    likeCount: tweet.public_metrics?.like_count ?? 0
+                  }
+                },
+                create: {
+                  id: tweet.id,
+                  text: tweet.text,
+                  authorId: tweet.author_id || 'unknown',
+                  authorName: tweet.author?.name || (isAmarielTweet ? process.env.X_USERNAME || 'Amariel' : 'Unknown User'),
+                  username: tweet.author?.username || (isAmarielTweet ? process.env.X_USERNAME || 'SentientAmariel' : 'unknown'),
+                  createdAt: new Date(tweet.created_at),
+                  cachedAt: new Date(),
+                  conversationId: tweet.conversation_id || null,
+                  inReplyToId: replyToId || null,
+                  metrics: {
+                    replyCount: tweet.public_metrics?.reply_count ?? 0,
+                    retweetCount: tweet.public_metrics?.retweet_count ?? 0,
+                    likeCount: tweet.public_metrics?.like_count ?? 0
+                  },
+                  published: true,
+                  isMock: false
+                }
+              });
+
+              processedTweets.push(dbTweet);
+
+              // If this is a mention of Amariel, create or update the mention record
+              if (!isAmarielTweet && tweet.text.includes('@SentientAmariel')) {
+                // Find if Amariel has replied to this mention
+                const hasResponse = tweets.some(t => {
+                  const isAmarielReply = t.author_id === process.env.X_USER_ID;
+                  const isReplyToThisTweet = t.referenced_tweets?.some(
+                    ref => ref.type === 'replied_to' && ref.id === tweet.id
+                  );
+                  return isAmarielReply && isReplyToThisTweet;
+                });
+
+                await prisma.mention.upsert({
+                  where: { id: tweet.id },
+                  update: {
+                    text: tweet.text,
+                    authorId: tweet.author_id,
+                    authorName: tweet.author?.name || 'Unknown User',
+                    username: tweet.author?.username || 'unknown',
+                    status: hasResponse ? 'RESPONDED' : 'PENDING',
+                    type: replyToId ? 'REPLY' : 'MENTION',
+                    inReplyToId: replyToId
+                  },
+                  create: {
+                    id: tweet.id,
+                    text: tweet.text,
+                    authorId: tweet.author_id,
+                    authorName: tweet.author?.name || 'Unknown User',
+                    username: tweet.author?.username || 'unknown',
+                    createdAt: new Date(tweet.created_at),
+                    status: hasResponse ? 'RESPONDED' : 'PENDING',
+                    type: replyToId ? 'REPLY' : 'MENTION',
+                    inReplyToId: replyToId
+                  }
+                });
+              }
+            }
+          } catch (error) {
+            console.error(`Error processing conversation ${conversationId}:`, error);
+          }
+        };
+
+        currentBatch.push(processConversation());
+
+        if (currentBatch.length >= BATCH_SIZE) {
+          await Promise.all(currentBatch);
+          currentBatch = [];
+        }
+      }
+
+      // Process any remaining conversations
+      if (currentBatch.length > 0) {
+        await Promise.all(currentBatch);
+      }
+
+      // Get mock tweets
+      const mockTweets = await this.fetchMockTweets();
+      console.log(`🎭 Found ${mockTweets.length} mock tweets`);
+
+      // Combine all tweets and sort by creation date
+      const combinedTweets = [...processedTweets, ...mockTweets].sort((a, b) => 
+        b.createdAt.getTime() - a.createdAt.getTime()
+      );
+
+      console.log('📊 Final counts:', {
+        processedTweets: processedTweets.length,
+        mockTweets: mockTweets.length,
+        total: combinedTweets.length
+      });
+
+      return combinedTweets;
+    } catch (error) {
+      console.error('❌ Error in getUserTweets:', error);
+      // If API fails, fall back to database
+      console.log('⚠️ Falling back to database only');
+      const dbTweets = await prisma.tweet.findMany({
+        orderBy: { createdAt: 'desc' }
+      });
+      return dbTweets;
+    }
+  }
+
+  private async fetchMockTweets(): Promise<PrismaTweet[]> {
+    return prisma.tweet.findMany({
+      where: {
+        isMock: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
   }
 } 

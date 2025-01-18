@@ -100,7 +100,7 @@ export default async function handler(
           id: responseId,
           text: response.content,
           authorId: process.env.X_USER_ID!,
-          authorName: process.env.X_USER_NAME || 'Amariel',
+          authorName: process.env.X_USERNAME || 'Amariel',
           username: process.env.X_USER_USERNAME || 'SentientAmariel',
           createdAt: new Date(),
           isMock: true,
