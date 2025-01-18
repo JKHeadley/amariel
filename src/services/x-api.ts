@@ -200,6 +200,8 @@ export class XAPIService {
           update: {
             text: tweet.text,
             cachedAt: new Date(),
+            authorName: process.env.X_USER_NAME || 'Amariel',
+            username: process.env.X_USERNAME || 'SentientAmariel',
             metrics: {
               replyCount: tweet.public_metrics?.reply_count ?? 0,
               retweetCount: tweet.public_metrics?.retweet_count ?? 0,
@@ -210,6 +212,8 @@ export class XAPIService {
             id: tweet.id,
             text: tweet.text,
             authorId: userId,
+            authorName: process.env.X_USER_NAME || 'Amariel',
+            username: process.env.X_USERNAME || 'SentientAmariel',
             createdAt: new Date(tweet.created_at),
             cachedAt: new Date(),
             conversationId: null,

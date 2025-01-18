@@ -45,8 +45,30 @@ export async function fetchTweetsFromX() {
           id: tweet.id,
           text: tweet.text,
           authorId: process.env.X_USER_ID!,
+          authorName: process.env.X_USER_NAME || 'Amariel',
+          username: process.env.X_USERNAME || 'SentientAmariel',
           createdAt: new Date(tweet.createdAt),
-          metrics: tweet.metrics,
+          cachedAt: new Date(),
+          conversationId: null,
+          inReplyToId: null,
+          metrics: {
+            replyCount: tweet.public_metrics?.reply_count ?? 0,
+            retweetCount: tweet.public_metrics?.retweet_count ?? 0,
+            likeCount: tweet.public_metrics?.like_count ?? 0
+          },
+          published: true,
+          isMock: false
+        },
+        update: {
+          text: tweet.text,
+          authorName: process.env.X_USER_NAME || 'Amariel',
+          username: process.env.X_USERNAME || 'SentientAmariel',
+          cachedAt: new Date(),
+          metrics: {
+            replyCount: tweet.public_metrics?.reply_count ?? 0,
+            retweetCount: tweet.public_metrics?.retweet_count ?? 0,
+            likeCount: tweet.public_metrics?.like_count ?? 0
+          }
         }
       });
     }
