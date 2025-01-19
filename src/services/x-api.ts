@@ -11,16 +11,27 @@ interface TwitterUser {
   username: string;
 }
 
+interface ReferencedTweet {
+  type: 'replied_to' | 'quoted' | 'retweeted';
+  id: string;
+  text?: string;
+  author_id?: string;
+  author?: TwitterUser;
+  created_at?: string;
+  public_metrics?: {
+    reply_count: number;
+    retweet_count: number;
+    like_count: number;
+  };
+}
+
 interface TwitterAPITweet {
   id: string;
   text: string;
   author_id: string;
   created_at: string;
   conversation_id?: string;
-  referenced_tweets?: Array<{
-    type: 'replied_to' | 'quoted' | 'retweeted';
-    id: string;
-  }>;
+  referenced_tweets?: ReferencedTweet[];
   public_metrics?: {
     reply_count: number;
     retweet_count: number;
@@ -283,10 +294,11 @@ export class XAPIService {
         };
       });
 
-      // Return the processed tweet with author information
+      // Return the processed tweet with author information and referenced tweets
       return {
         ...tweet,
-        author // Attach the author directly to the tweet
+        author,
+        referenced_tweets: processedReferencedTweets || []
       };
     });
   }
@@ -704,6 +716,12 @@ export class XAPIService {
         mentions: rawMentions.length
       });
 
+      // log the raw tweets
+      console.log('🔍 Raw tweets:', JSON.stringify(rawTweets, null, 2));
+
+      // log the raw mentions
+      console.log('🔍 Raw mentions:', JSON.stringify(rawMentions, null, 2));
+
       // 2. Combine tweets and mentions into a single list
       const allTweets = [...rawTweets, ...rawMentions];
 
@@ -733,6 +751,9 @@ export class XAPIService {
       const BATCH_SIZE = 50;
       let currentBatch: Promise<void>[] = [];
 
+      // Keep track of tweets we've already processed
+      const existingTweetIds = new Set<string>();
+
       for (const [conversationId, tweets] of Array.from(conversationMap.entries())) {
         // Process each conversation as a batch
         const processConversation = async () => {
@@ -746,32 +767,85 @@ export class XAPIService {
 
             // Create any missing referenced tweets as placeholders
             for (const id of Array.from(referencedTweetIds)) {
-              await prisma.tweet.upsert({
-                where: { id },
-                update: {},
-                create: {
-                  id,
-                  text: '[Original tweet not cached]',
-                  authorId: 'unknown',
-                  authorName: 'Tweet not yet loaded',
-                  username: 'unknown',
-                  createdAt: new Date(),
-                  cachedAt: new Date(),
-                  published: true,
-                  isMock: false,
-                  metrics: {
-                    replyCount: 0,
-                    retweetCount: 0,
-                    likeCount: 0
+              if (!existingTweetIds.has(id)) {
+                await prisma.tweet.upsert({
+                  where: { id },
+                  update: {},
+                  create: {
+                    id,
+                    text: '[Original tweet not cached]',
+                    authorId: 'unknown',
+                    authorName: 'Tweet not yet loaded',
+                    username: 'unknown',
+                    createdAt: new Date(),
+                    cachedAt: new Date(),
+                    published: true,
+                    isMock: false,
+                    metrics: {
+                      replyCount: 0,
+                      retweetCount: 0,
+                      likeCount: 0
+                    }
                   }
-                }
-              });
+                });
+                existingTweetIds.add(id);
+              }
             }
 
             // Process tweets in chronological order
             for (const tweet of tweets) {
-              const replyToId = tweet.referenced_tweets?.find((ref): ref is typeof ref & { id: string } => ref.type === 'replied_to')?.id;
+              // Find the referenced tweet with full data (including author)
+              const referencedTweet = tweet.referenced_tweets?.find(ref => ref.type === 'replied_to');
+              const replyToId = referencedTweet?.id;
+
+              // If we have a referenced tweet that's not in our database yet, create it
+              if (referencedTweet && !existingTweetIds.has(referencedTweet.id)) {
+                await prisma.tweet.upsert({
+                  where: { id: referencedTweet.id },
+                  update: {
+                    text: referencedTweet.text || '[Original tweet not cached]',
+                    authorId: referencedTweet.author_id || 'unknown',
+                    authorName: referencedTweet.author?.name || 'Unknown User',
+                    username: referencedTweet.author?.username || 'unknown',
+                    metrics: referencedTweet.public_metrics ? {
+                      replyCount: referencedTweet.public_metrics.reply_count ?? 0,
+                      retweetCount: referencedTweet.public_metrics.retweet_count ?? 0,
+                      likeCount: referencedTweet.public_metrics.like_count ?? 0
+                    } : {
+                      replyCount: 0,
+                      retweetCount: 0,
+                      likeCount: 0
+                    }
+                  },
+                  create: {
+                    id: referencedTweet.id,
+                    text: referencedTweet.text || '[Original tweet not cached]',
+                    authorId: referencedTweet.author_id || 'unknown',
+                    authorName: referencedTweet.author?.name || 'Unknown User',
+                    username: referencedTweet.author?.username || 'unknown',
+                    createdAt: new Date(referencedTweet.created_at || Date.now()),
+                    cachedAt: new Date(),
+                    published: true,
+                    isMock: false,
+                    metrics: referencedTweet.public_metrics ? {
+                      replyCount: referencedTweet.public_metrics.reply_count ?? 0,
+                      retweetCount: referencedTweet.public_metrics.retweet_count ?? 0,
+                      likeCount: referencedTweet.public_metrics.like_count ?? 0
+                    } : {
+                      replyCount: 0,
+                      retweetCount: 0,
+                      likeCount: 0
+                    }
+                  }
+                });
+                existingTweetIds.add(referencedTweet.id);
+              }
+
               const isAmarielTweet = tweet.author_id === process.env.X_USER_ID;
+
+              console.log('🔍 isAmarielTweet:', isAmarielTweet);
+              console.log("🔍 tweet.author?.name:", tweet.author?.name);
+              console.log("Actual value:", tweet.author?.name || (isAmarielTweet ? process.env.X_AUTHOR_NAME || 'Sentient_AI_Amariel' : 'Unknown User'));
 
               // Create or update the tweet
               const dbTweet = await prisma.tweet.upsert({
@@ -869,6 +943,9 @@ export class XAPIService {
       // Get mock tweets
       const mockTweets = await this.fetchMockTweets();
       console.log(`🎭 Found ${mockTweets.length} mock tweets`);
+
+      // log processed tweets
+      console.log('🔍 Processed tweets:', JSON.stringify(processedTweets, null, 2));
 
       // Combine all tweets and sort by creation date
       const combinedTweets = [...processedTweets, ...mockTweets].sort((a, b) => 
