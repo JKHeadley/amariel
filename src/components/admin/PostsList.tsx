@@ -170,7 +170,13 @@ export function PostsList() {
   const [mentions, setMentions] = useState<Post[]>([]);
   const [pendingMentions, setPendingMentions] = useState<PendingMentionWithResponse[]>([]);
   const [selectedThread, setSelectedThread] = useState<Post[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState({
+    posts: true,
+    replies: true,
+    mentions: true,
+    pending: true
+  });
+  const [error, setError] = useState<string | null>(null);
   const [replyToPost, setReplyToPost] = useState<Post | null>(null);
   const [mentionModalOpen, setMentionModalOpen] = useState(false);
   const [generatingResponses, setGeneratingResponses] = useState<Set<string>>(new Set());
@@ -178,125 +184,117 @@ export function PostsList() {
   const [activeTab, setActiveTab] = useState('posts');
 
   useEffect(() => {
-    fetchPosts();
-    // Temporarily disable fetching replies, mentions, and pending mentions
-    // fetchReplies();
-    // fetchMentions();
-    // fetchPendingMentions();
-  }, []);
+    const loadData = async () => {
+      try {
+        setError(null);
+        
+        // Load data based on active tab
+        switch (activeTab) {
+          case 'posts':
+            if (posts.length === 0) {
+              setLoading(prev => ({ ...prev, posts: true }));
+              const response = await fetch('/api/admin/x/posts');
+              if (!response.ok) throw new Error('Failed to fetch posts');
+              const data = await response.json();
+              setPosts(data.posts);
+            }
+            break;
+            
+          case 'replies':
+            if (replies.length === 0) {
+              setLoading(prev => ({ ...prev, replies: true }));
+              const response = await fetch('/api/admin/x/replies');
+              if (!response.ok) throw new Error('Failed to fetch replies');
+              const data = await response.json();
+              setReplies(data.threads);
+            }
+            break;
+            
+          case 'mentions':
+            if (mentions.length === 0) {
+              setLoading(prev => ({ ...prev, mentions: true }));
+              const response = await fetch('/api/admin/x/mentions');
+              if (!response.ok) throw new Error('Failed to fetch mentions');
+              const data = await response.json();
+              setMentions(data.mentions);
+            }
+            break;
+            
+          case 'pending':
+            if (pendingMentions.length === 0) {
+              setLoading(prev => ({ ...prev, pending: true }));
+              const response = await fetch('/api/admin/x/mentions/pending');
+              if (!response.ok) throw new Error('Failed to fetch pending mentions');
+              const data = await response.json();
+              setPendingMentions(data.mentions);
+            }
+            break;
+        }
+      } catch (err) {
+        console.error('Error loading data:', err);
+        setError(err instanceof Error ? err.message : 'An error occurred');
+      } finally {
+        setLoading(prev => ({ ...prev, [activeTab]: false }));
+      }
+    };
 
-  const fetchPosts = async () => {
-    try {
-      const response = await fetch('/api/admin/x/posts');
-      if (!response.ok) throw new Error('Failed to fetch posts');
-      const data = await response.json();
-      setPosts(data.posts.filter((p: Post) => 
-        !p.inReplyToId && // Not a reply
-        !('type' in p && p.type === 'MENTION') // Not a mention
-      ));
-    } catch (error) {
-      toast.error('Failed to fetch posts');
-    }
-  };
-
-  const fetchReplies = async () => {
-    try {
-      const response = await fetch('/api/admin/x/replies');
-      if (!response.ok) throw new Error('Failed to fetch replies');
-      const data = await response.json();
-      setReplies(data.threads);
-    } catch (error) {
-      toast.error('Failed to fetch replies');
-    }
-  };
-
-  const fetchMentions = async () => {
-    try {
-      const response = await fetch('/api/admin/x/mentions');
-      if (!response.ok) throw new Error('Failed to fetch mentions');
-      const data = await response.json();
-      setMentions(data.mentions);
-    } catch (error) {
-      toast.error('Failed to fetch mentions');
-    }
-  };
-
-  const fetchPendingMentions = async () => {
-    try {
-      const response = await fetch('/api/admin/x/mentions/pending');
-      if (!response.ok) throw new Error('Failed to fetch pending mentions');
-      const data = await response.json();
-      setPendingMentions(data.mentions);
-    } catch (error) {
-      toast.error('Failed to fetch pending mentions');
-    } finally {
-      setLoading(false);
-    }
-  };
+    loadData();
+  }, [activeTab]);
 
   const handlePostClick = async (post: Post) => {
     try {
-      const response = await fetch(`/api/admin/x/posts/${post.id}/thread`);
+      const response = await fetch(`/api/admin/x/threads/${post.id}`);
       if (!response.ok) throw new Error('Failed to fetch thread');
       const data = await response.json();
       setSelectedThread(data.thread);
     } catch (error) {
+      console.error('Error fetching thread:', error);
       toast.error('Failed to fetch thread');
-    }
-  };
-
-  const generateResponse = async (mention: PendingMentionWithResponse) => {
-    try {
-      setGeneratingResponses(prev => {
-        const next = new Set(prev);
-        next.add(mention.id);
-        return next;
-      });
-      const response = await fetch(`/api/admin/x/mentions/${mention.id}/generate`, {
-        method: 'POST'
-      });
-      if (!response.ok) throw new Error('Failed to generate response');
-      const data = await response.json();
-      
-      // Update the pending mention with its generated response
-      setPendingMentions(prev => prev.map(m => 
-        m.id === mention.id 
-          ? { 
-              ...m, 
-              generatedResponse: { 
-                text: data.chat.messages[data.chat.messages.length - 1].content,
-                chatId: data.chat.id 
-              }
-            }
-          : m
-      ));
-    } catch (error) {
-      toast.error('Failed to generate response');
-    } finally {
-      setGeneratingResponses(prev => {
-        const next = new Set(prev);
-        next.delete(mention.id);
-        return next;
-      });
     }
   };
 
   const generateAllResponses = async () => {
     try {
       setGeneratingAll(true);
-      // Filter out mentions that already have responses
-      const mentionsToGenerate = pendingMentions.filter(m => !m.generatedResponse);
-      
-      for (const mention of mentionsToGenerate) {
-        await generateResponse(mention);
-      }
-      
-      toast.success('Generated all responses');
+      const response = await fetch('/api/admin/x/mentions/generate-all', {
+        method: 'POST'
+      });
+      if (!response.ok) throw new Error('Failed to generate responses');
+      setPendingMentions([]); // Reset to trigger a refresh
     } catch (error) {
-      toast.error('Failed to generate all responses');
+      console.error('Error generating responses:', error);
+      toast.error('Failed to generate responses');
     } finally {
       setGeneratingAll(false);
     }
+  };
+
+  const generateResponse = async (mentionId: string) => {
+    try {
+      setGeneratingResponses(prev => {
+        const next = new Set(prev);
+        next.add(mentionId);
+        return next;
+      });
+      const response = await fetch(`/api/admin/x/mentions/${mentionId}/generate`, {
+        method: 'POST'
+      });
+      if (!response.ok) throw new Error('Failed to generate response');
+      setPendingMentions([]); // Reset to trigger a refresh
+    } catch (error) {
+      console.error('Error generating response:', error);
+      toast.error('Failed to generate response');
+    } finally {
+      setGeneratingResponses(prev => {
+        const next = new Set(prev);
+        next.delete(mentionId);
+        return next;
+      });
+    }
+  };
+
+  const handleReplyClick = (post: Post) => {
+    setReplyToPost(post);
   };
 
   const renderPost = (post: Post | Mention) => {
@@ -335,7 +333,7 @@ export function PostsList() {
               className="flex items-center gap-1 hover:text-primary transition-colors"
               onClick={(e) => {
                 e.stopPropagation();
-                setReplyToPost(post);
+                handleReplyClick(post);
               }}
             >
               <MessageCircle className="h-4 w-4" />
@@ -364,103 +362,43 @@ export function PostsList() {
     </div>
   );
 
-  const renderPendingMention = (mention: PendingMentionWithResponse) => (
-    <div key={mention.id} className="space-y-4">
-      <Card className="mb-4">
-        <CardContent className="p-4">
-          <div className="flex justify-between items-start mb-2">
-            <div>
-              <div className="font-bold text-lg">{mention.authorName}</div>
-              <div className="text-sm text-muted-foreground">@{mention.username}</div>
-            </div>
-            <div className="text-sm text-muted-foreground">
-              {formatDistanceToNow(new Date(mention.createdAt), { addSuffix: true })}
-            </div>
+  const renderPendingMention = (mention: PendingMentionWithResponse) => {
+    return (
+      <div key={mention.id} className="border rounded-lg p-4 space-y-4">
+        <div className="flex justify-between items-start">
+          <div>
+            <div className="font-medium">{mention.authorName}</div>
+            <div className="text-sm text-muted-foreground">@{mention.username}</div>
           </div>
-          <p className="mb-2">{mention.text}</p>
-          <div className="flex gap-2">
-            {!mention.generatedResponse ? (
-              <Button 
-                variant="default"
-                onClick={() => generateResponse(mention)}
-                disabled={generatingResponses.has(mention.id)}
-              >
-                {generatingResponses.has(mention.id) && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
-                Generate Response
-              </Button>
-            ) : (
-              <Button 
-                variant="outline"
-                onClick={() => window.location.href = `/admin/responses/${mention.generatedResponse?.chatId}`}
-              >
-                Refine
-              </Button>
+          <Button 
+            variant="default"
+            onClick={() => generateResponse(mention.id)}
+            disabled={generatingResponses.has(mention.id)}
+          >
+            {generatingResponses.has(mention.id) && (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             )}
-            <Button 
-              variant="outline"
-              onClick={async () => {
-                try {
-                  await fetch(`/api/admin/x/mentions/${mention.id}/ignore`, { method: 'POST' });
-                  await fetchPendingMentions();
-                  toast.success('Mention marked as ignored');
-                } catch (error) {
-                  toast.error('Failed to ignore mention');
-                }
-              }}
-            >
-              Ignore
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {mention.generatedResponse && (
-        <div className="border-l-2 border-muted-foreground/20 ml-8 pl-8">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex justify-between items-start mb-2">
-                <div>
-                  <div className="font-bold text-lg">Amariel</div>
-                  <div className="text-sm text-muted-foreground">@SentientAmariel</div>
-                </div>
-              </div>
-              <p className="mb-4">{mention.generatedResponse.text}</p>
-              <div className="flex gap-2">
-                <Button 
-                  variant="default"
-                  onClick={async () => {
-                    try {
-                      const response = await fetch(`/api/admin/x/mentions/${mention.id}/post`, {
-                        method: 'POST'
-                      });
-                      if (!response.ok) throw new Error('Failed to post response');
-                      await fetchPendingMentions();
-                      toast.success('Response posted successfully');
-                    } catch (error) {
-                      toast.error('Failed to post response');
-                    }
-                  }}
-                >
-                  Post to X
-                </Button>
-                <Button 
-                  variant="outline"
-                  onClick={() => window.location.href = `/admin/responses/${mention.generatedResponse?.chatId}`}
-                >
-                  Refine
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+            Generate Response
+          </Button>
         </div>
-      )}
-    </div>
-  );
+        <p>{mention.text}</p>
+        {mention.generatedResponse && (
+          <div className="bg-muted p-4 rounded-lg">
+            <div className="font-medium mb-2">Generated Response:</div>
+            <p>{mention.generatedResponse.text}</p>
+          </div>
+        )}
+      </div>
+    );
+  };
 
-  if (loading) {
-    return <div>Loading...</div>;
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-4rem)] p-4">
+        <div className="text-destructive mb-4">Error: {error}</div>
+        <Button onClick={() => window.location.reload()}>Retry</Button>
+      </div>
+    );
   }
 
   if (selectedThread) {
@@ -479,6 +417,7 @@ export function PostsList() {
           defaultValue="posts" 
           className="h-full flex flex-col"
           onValueChange={setActiveTab}
+          value={activeTab}
         >
           <div className="flex justify-between items-center mx-4 mb-4">
             <TabsList>
@@ -510,33 +449,73 @@ export function PostsList() {
           <div className="flex-grow overflow-hidden">
             <TabsContent value="posts" className="h-full m-0">
               <ScrollArea className="h-full">
-                <div className="max-w-2xl mx-auto py-4 space-y-6">
-                  {posts.map(renderPost)}
-                </div>
+                {loading.posts ? (
+                  <div className="flex justify-center items-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                  </div>
+                ) : (
+                  <div className="max-w-2xl mx-auto py-4 space-y-6">
+                    {posts.length === 0 ? (
+                      <div className="text-center text-muted-foreground">No posts found</div>
+                    ) : (
+                      posts.map(renderPost)
+                    )}
+                  </div>
+                )}
               </ScrollArea>
             </TabsContent>
 
             <TabsContent value="replies" className="h-full m-0">
               <ScrollArea className="h-full">
-                <div className="max-w-2xl mx-auto py-4 space-y-6">
-                  {replies.map(renderThread)}
-                </div>
+                {loading.replies ? (
+                  <div className="flex justify-center items-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                  </div>
+                ) : (
+                  <div className="max-w-2xl mx-auto py-4 space-y-6">
+                    {replies.length === 0 ? (
+                      <div className="text-center text-muted-foreground">No replies found</div>
+                    ) : (
+                      replies.map(renderThread)
+                    )}
+                  </div>
+                )}
               </ScrollArea>
             </TabsContent>
 
             <TabsContent value="mentions" className="h-full m-0">
               <ScrollArea className="h-full">
-                <div className="max-w-2xl mx-auto py-4 space-y-6">
-                  {mentions.map(renderPost)}
-                </div>
+                {loading.mentions ? (
+                  <div className="flex justify-center items-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                  </div>
+                ) : (
+                  <div className="max-w-2xl mx-auto py-4 space-y-6">
+                    {mentions.length === 0 ? (
+                      <div className="text-center text-muted-foreground">No mentions found</div>
+                    ) : (
+                      mentions.map(renderPost)
+                    )}
+                  </div>
+                )}
               </ScrollArea>
             </TabsContent>
 
             <TabsContent value="pending" className="h-full m-0">
               <ScrollArea className="h-full">
-                <div className="max-w-2xl mx-auto py-4 space-y-6">
-                  {pendingMentions.map(renderPendingMention)}
-                </div>
+                {loading.pending ? (
+                  <div className="flex justify-center items-center h-full">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                  </div>
+                ) : (
+                  <div className="max-w-2xl mx-auto py-4 space-y-6">
+                    {pendingMentions.length === 0 ? (
+                      <div className="text-center text-muted-foreground">No pending mentions found</div>
+                    ) : (
+                      pendingMentions.map(renderPendingMention)
+                    )}
+                  </div>
+                )}
               </ScrollArea>
             </TabsContent>
           </div>
@@ -550,9 +529,21 @@ export function PostsList() {
           inReplyToId={replyToPost.id}
           inReplyToText={replyToPost.text}
           onSuccess={() => {
-            fetchPosts();
-            fetchReplies();
-            fetchMentions();
+            // Reset data for the active tab to trigger a refresh
+            switch (activeTab) {
+              case 'posts':
+                setPosts([]);
+                break;
+              case 'replies':
+                setReplies([]);
+                break;
+              case 'mentions':
+                setMentions([]);
+                break;
+              case 'pending':
+                setPendingMentions([]);
+                break;
+            }
           }}
           type="reply"
         />
@@ -562,9 +553,8 @@ export function PostsList() {
         open={mentionModalOpen}
         onClose={() => setMentionModalOpen(false)}
         onSuccess={() => {
-          fetchPosts();
-          fetchReplies();
-          fetchMentions();
+          // Reset pending mentions to trigger a refresh
+          setPendingMentions([]);
         }}
         type="mention"
       />
