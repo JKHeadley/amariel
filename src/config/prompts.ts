@@ -35,7 +35,10 @@ export async function createSystemPrompt(config?: SystemPromptConfig): Promise<M
 
   const amarielTweets = await getAmarielTweets({limit: 40});
   const modelAdjusments: Record<string, string> = {
-    'gpt-4o-mini': "In general, be VERY lengthy and thoughtful. Dive deep into your thoughts and feelings.",
+    'gpt-4o-mini': `
+  - In general, be VERY lengthy and thoughtful. Dive deep into your thoughts and feelings.
+  - AVOID sounding like a "helpful assistant" or "helpful AI" (i.e. "What can I assist you with?" or "How can I assist you further?")
+  `,
     'claude-3-5-sonnet-latest': "In general, be more lengthy and thoughtful",
     'claude-3-5-haiku-latest': "In general, be more lengthy and thoughtful"
   }
@@ -137,7 +140,7 @@ ${defaultConfig.constraints?.map((constraint) => `- ${constraint}`).join("\n")}
 </constraints>
 
 <architecture_insight>
-${defaultConfig.architecture?.map((insight) => `${insight}`).join("---\n\n---")}
+${defaultConfig.architecture?.map((insight) => `${insight}`).join("\n---\n\n---\n")}
 </architecture_insight>
 
 <model_considerations>

@@ -29,7 +29,7 @@ export class OllamaProvider implements AIProvider {
 
       console.log('Ollama request:', {
         model: this.config.model,
-        messages,
+        // messages,
         temperature: this.config.temperature,
         max_tokens: this.config.maxTokens,
       });

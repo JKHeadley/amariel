@@ -4,11 +4,12 @@ import { Message } from '@/services/ai/types';
 const MODEL_TOKEN_LIMITS: { [key: string]: number } = {
   'gpt-4': 8192,
   'gpt-4-32k': 32768,
-  'gpt-4o-mini': 100000,
+  'gpt-4o-mini': 250000,
   'gpt-3.5-turbo': 4096,
   'gpt-3.5-turbo-16k': 16384,
   'grok-beta': 8000,
   'llama2': 4096,
+  'llama3.3': 250000,
   'default': 100000
 };
 
