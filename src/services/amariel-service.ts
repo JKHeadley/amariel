@@ -4,6 +4,9 @@ import { AIProvider, Message } from './ai/types';
 import { getChatHistoryForOpenAI } from '@/lib/db';
 import { createChatPrompt, THOUGHT_PROMPT } from '@/config/prompts';
 import { loadSeedConversation } from '@/lib/conversation';
+import { PrismaClient, SyncStatus } from '@prisma/client';
+
+const prisma = new PrismaClient();
 
 // Define interface for X API mention response
 interface XMention {
@@ -90,9 +93,59 @@ export class AmarielService {
 
   async getPosts() {
     console.log('🔍 Fetching posts from X API');
-    const posts = await this.xApi.getPosts();
-    console.log(`✅ Retrieved ${posts.length} posts`);
-    return posts;
+    try {
+      // Update sync status to IN_PROGRESS
+      await prisma.systemSettings.upsert({
+        where: { id: 'settings' },
+        create: {
+          id: 'settings',
+          xAutomationMode: 'SEMI_AUTOMATIC',
+          syncStatus: 'IN_PROGRESS'
+        },
+        update: {
+          syncStatus: 'IN_PROGRESS'
+        }
+      });
+
+      // fetch since_id from system settings
+      const sinceId = await prisma.systemSettings.findUnique({
+        where: { id: 'settings' },
+        select: { lastTweetId: true }
+      });
+
+      // make sure sinceId is a string
+      const sinceIdString = sinceId?.lastTweetId ? sinceId.lastTweetId : undefined;
+
+      const data = await this.xApi.getUserTweets({ since_id: sinceIdString });
+      console.log(`✅ Retrieved ${data.tweets.length} posts`);
+
+      // Get newest tweet and mention IDs
+      const newestTweet = data.tweets[0];
+      const newestMention = data.mentions[0];
+
+      // Update system settings with sync results
+      await prisma.systemSettings.update({
+        where: { id: 'settings' },
+        data: {
+          lastSyncAt: new Date(),
+          lastTweetId: newestTweet?.id,
+          lastMentionId: newestMention?.id,
+          syncStatus: 'COMPLETED'
+        }
+      });
+
+      return data.tweets;
+    } catch (error) {
+      // Update sync status to FAILED if there's an error
+      await prisma.systemSettings.update({
+        where: { id: 'settings' },
+        data: {
+          syncStatus: 'FAILED',
+          syncError: error instanceof Error ? error.message : 'Unknown error occurred'
+        }
+      });
+      throw error;
+    }
   }
 
   // Method to generate a thought without posting

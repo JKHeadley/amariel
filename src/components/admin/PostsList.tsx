@@ -3,7 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MessageCircle, Repeat, Heart, Loader2 } from 'lucide-react';
+import { MessageCircle, Repeat, Heart, Loader2, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
 import { ChevronLeft } from 'lucide-react';
@@ -174,7 +174,8 @@ export function PostsList() {
     posts: true,
     replies: true,
     mentions: true,
-    pending: true
+    pending: true,
+    sync: false
   });
   const [error, setError] = useState<string | null>(null);
   const [replyToPost, setReplyToPost] = useState<Post | null>(null);
@@ -295,6 +296,32 @@ export function PostsList() {
 
   const handleReplyClick = (post: Post) => {
     setReplyToPost(post);
+  };
+
+  const handleSync = async () => {
+    try {
+      setLoading(prev => ({ ...prev, sync: true }));
+      const response = await fetch('/api/admin/x/sync', {
+        method: 'POST'
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to sync X data');
+      }
+      
+      // Reset all data to trigger a refresh
+      setPosts([]);
+      setReplies([]);
+      setMentions([]);
+      setPendingMentions([]);
+      
+      toast.success('Successfully synced X data');
+    } catch (error) {
+      console.error('Error syncing X data:', error);
+      toast.error('Failed to sync X data');
+    } finally {
+      setLoading(prev => ({ ...prev, sync: false }));
+    }
   };
 
   const renderPost = (post: Post | Mention) => {
@@ -427,6 +454,19 @@ export function PostsList() {
               <TabsTrigger value="pending">Pending</TabsTrigger>
             </TabsList>
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={handleSync}
+                disabled={loading.sync}
+                className="flex items-center gap-2"
+              >
+                {loading.sync ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Fetch X Data
+              </Button>
               <Button 
                 variant="outline"
                 onClick={() => setMentionModalOpen(true)}

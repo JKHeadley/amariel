@@ -115,8 +115,16 @@ model Message {
 model SystemSettings {
   id               String          @id @default(cuid())
   xAutomationMode  XAutomationMode @default(SEMI_AUTOMATIC)
+  
+  // Sync tracking
+  lastSyncAt       DateTime?       // When we last successfully synced
+  lastTweetId      String?         // ID of newest tweet we've synced
+  lastMentionId    String?         // ID of newest mention we've synced
+  syncStatus       SyncStatus      @default(IDLE)
+  syncError        String?         // Last sync error message
+  
+  // Existing fields
   lastMentionCheck DateTime?
-  lastMentionId    String?
   lastTweetCheck   DateTime?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
@@ -209,4 +217,11 @@ enum MessageType {
 enum XAutomationMode {
   AUTOMATIC
   SEMI_AUTOMATIC
+}
+
+enum SyncStatus {
+  IDLE
+  IN_PROGRESS
+  FAILED
+  COMPLETED
 } 
