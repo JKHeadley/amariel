@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
 import { ChevronLeft } from 'lucide-react';
 import { TweetComposeModal } from './TweetComposeModal';
+import { useRouter } from 'next/router';
 
 interface Post {
   id: string;
@@ -50,9 +51,13 @@ interface Mention {
 }
 
 interface PendingMentionWithResponse extends Mention {
-  generatedResponse?: {
-    text: string;
-    chatId: string;
+  status: 'PENDING' | 'PROCESSING' | 'RESPONDED' | 'FAILED' | 'IGNORED';
+  chat?: {
+    id: string;
+    messages: {
+      content: string;
+      role: string;
+    }[];
   };
 }
 
@@ -183,6 +188,7 @@ export function PostsList() {
   const [generatingResponses, setGeneratingResponses] = useState<Set<string>>(new Set());
   const [generatingAll, setGeneratingAll] = useState(false);
   const [activeTab, setActiveTab] = useState('posts');
+  const router = useRouter();
 
   useEffect(() => {
     const loadData = async () => {
@@ -281,7 +287,13 @@ export function PostsList() {
         method: 'POST'
       });
       if (!response.ok) throw new Error('Failed to generate response');
+      const data = await response.json();
       setPendingMentions([]); // Reset to trigger a refresh
+      
+      // Redirect to the chat for response refinement
+      if (data.chat?.id) {
+        router.push(`/admin/chats/${data.chat.id}`);
+      }
     } catch (error) {
       console.error('Error generating response:', error);
       toast.error('Failed to generate response');
@@ -390,6 +402,9 @@ export function PostsList() {
   );
 
   const renderPendingMention = (mention: PendingMentionWithResponse) => {
+    const latestResponse = mention.chat?.messages[0]?.content;
+    const isProcessing = mention.status === 'PROCESSING';
+
     return (
       <div key={mention.id} className="border rounded-lg p-4 space-y-4">
         <div className="flex justify-between items-start">
@@ -397,22 +412,39 @@ export function PostsList() {
             <div className="font-medium">{mention.authorName}</div>
             <div className="text-sm text-muted-foreground">@{mention.username}</div>
           </div>
-          <Button 
-            variant="default"
-            onClick={() => generateResponse(mention.id)}
-            disabled={generatingResponses.has(mention.id)}
-          >
-            {generatingResponses.has(mention.id) && (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            )}
-            Generate Response
-          </Button>
+          {isProcessing ? (
+            <div className="flex gap-2">
+              <Button 
+                variant="default"
+                onClick={() => router.push(`/admin/x/mentions/${mention.id}/refine`)}
+              >
+                Refine
+              </Button>
+              <Button 
+                variant="default"
+                onClick={() => router.push(`/admin/x/mentions/${mention.id}/post`)}
+              >
+                Post to X
+              </Button>
+            </div>
+          ) : (
+            <Button 
+              variant="default"
+              onClick={() => generateResponse(mention.id)}
+              disabled={generatingResponses.has(mention.id)}
+            >
+              {generatingResponses.has(mention.id) && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Generate Response
+            </Button>
+          )}
         </div>
         <p>{mention.text}</p>
-        {mention.generatedResponse && (
+        {isProcessing && latestResponse && (
           <div className="bg-muted p-4 rounded-lg">
             <div className="font-medium mb-2">Generated Response:</div>
-            <p>{mention.generatedResponse.text}</p>
+            <p>{latestResponse}</p>
           </div>
         )}
       </div>
@@ -477,7 +509,7 @@ export function PostsList() {
                 <Button
                   variant="default"
                   onClick={generateAllResponses}
-                  disabled={generatingAll || pendingMentions.every(m => m.generatedResponse)}
+                  disabled={generatingAll || pendingMentions.every(m => m.status === 'PROCESSING')}
                 >
                   {generatingAll && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Generate All Responses

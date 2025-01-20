@@ -56,8 +56,26 @@ export async function getMentions() {
 export async function getPendingMentions() {
   return prisma.mention.findMany({
     where: {
-      processedAt: null,
-      status: { not: 'IGNORED' }
+      OR: [
+        { status: 'PENDING' },
+        { status: 'PROCESSING' }
+      ],
+      NOT: { status: 'IGNORED' }
+    },
+    include: {
+      chat: {
+        include: {
+          messages: {
+            orderBy: {
+              createdAt: 'desc'
+            },
+            take: 1,
+            where: {
+              role: 'ASSISTANT'
+            }
+          }
+        }
+      }
     },
     orderBy: { createdAt: 'desc' }
   });
