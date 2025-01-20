@@ -405,6 +405,22 @@ export function PostsList() {
     const latestResponse = mention.chat?.messages[0]?.content;
     const isProcessing = mention.status === 'PROCESSING';
 
+    const handleReset = async () => {
+      try {
+        const response = await fetch(`/api/admin/x/mentions/${mention.id}/reset`, {
+          method: 'POST'
+        });
+        if (!response.ok) throw new Error('Failed to reset mention');
+        
+        // Reset pending mentions to trigger a refresh
+        setPendingMentions([]);
+        toast.success('Successfully reset mention');
+      } catch (error) {
+        console.error('Error resetting mention:', error);
+        toast.error('Failed to reset mention');
+      }
+    };
+
     return (
       <div key={mention.id} className="border rounded-lg p-4 space-y-4">
         <div className="flex justify-between items-start">
@@ -416,15 +432,30 @@ export function PostsList() {
             <div className="flex gap-2">
               <Button 
                 variant="default"
-                onClick={() => router.push(`/admin/x/mentions/${mention.id}/refine`)}
+                onClick={() => {
+                  router.push(`/admin/x/mentions/${mention.id}/refine`);
+                  // Reset pending mentions to trigger a refresh when returning
+                  setPendingMentions([]);
+                }}
               >
                 Refine
               </Button>
               <Button 
                 variant="default"
-                onClick={() => router.push(`/admin/x/mentions/${mention.id}/post`)}
+                onClick={() => {
+                  router.push(`/admin/x/mentions/${mention.id}/post`);
+                  // Reset pending mentions to trigger a refresh when returning
+                  setPendingMentions([]);
+                }}
               >
                 Post to X
+              </Button>
+              <Button 
+                variant="outline"
+                onClick={handleReset}
+                className="text-red-500 hover:text-red-600 hover:bg-red-50"
+              >
+                Reset
               </Button>
             </div>
           ) : (
