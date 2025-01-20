@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { AIProvider, Message, AIProviderConfig } from './types';
+import { validateTokenCount } from '@/lib/tokens';
 
 export class OllamaProvider implements AIProvider {
   private client: OpenAI;
@@ -12,6 +13,7 @@ export class OllamaProvider implements AIProvider {
     });
     
     this.config = {
+      apiKey: config.apiKey,
       model: config.model || 'llama2',
       temperature: config.temperature ?? 0.7,
       maxTokens: config.maxTokens ?? 8000,
@@ -20,6 +22,11 @@ export class OllamaProvider implements AIProvider {
 
   async generateCompletion(messages: Message[]): Promise<string> {
     try {
+      // Validate token count before making the request
+      if (!validateTokenCount(messages, this.config.model)) {
+        throw new Error('Token limit exceeded for model ' + this.config.model);
+      }
+
       console.log('Ollama request:', {
         model: this.config.model,
         messages,

@@ -50,6 +50,7 @@
     "shadcn-ui": "^0.9.4",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "tiktoken": "^1.0.18",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
