@@ -530,6 +530,26 @@ export function PostsList() {
                 )}
                 Fetch X Data
               </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  try {
+                    const response = await fetch('/api/admin/x/hydrate', {
+                      method: 'POST'
+                    });
+                    if (!response.ok) throw new Error('Failed to hydrate tweets');
+                    const data = await response.json();
+                    toast.success(`Successfully hydrated ${data.hydrated} tweets`);
+                    // Reset posts to trigger a refresh
+                    setPosts([]);
+                  } catch (error) {
+                    console.error('Error hydrating tweets:', error);
+                    toast.error('Failed to hydrate tweets');
+                  }
+                }}
+              >
+                Hydrate Tweets
+              </Button>
               <Button 
                 variant="outline"
                 onClick={() => setMentionModalOpen(true)}

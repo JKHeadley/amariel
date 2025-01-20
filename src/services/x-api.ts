@@ -39,6 +39,9 @@ interface TwitterAPITweet {
     like_count: number;
   };
   author?: TwitterUser;
+  note_tweet?: {
+    text: string;
+  };
 }
 
 interface TwitterResponse {
@@ -428,5 +431,53 @@ export class XAPIService {
         createdAt: 'desc'
       }
     });
+  }
+
+  async hydrateTweets(tweetIds: string[]): Promise<TwitterAPITweet[]> {
+    if (this.devMode) {
+      console.log('🎭 Using mock data for tweet hydration');
+      return tweetIds.map(id => ({
+        id,
+        text: 'Mock hydrated tweet text for development',
+        author_id: process.env.X_USER_ID!,
+        created_at: new Date().toISOString()
+      }));
+    }
+
+    if (!tweetIds.length) {
+      return [];
+    }
+
+    console.log('🔍 Hydrating tweets:', tweetIds);
+    
+    const url = 'https://api.twitter.com/2/tweets';
+    const params = new URLSearchParams({
+      'ids': tweetIds.join(','),
+      'tweet.fields': 'created_at,public_metrics,referenced_tweets,conversation_id,in_reply_to_user_id,author_id,note_tweet',
+      'expansions': 'author_id,referenced_tweets.id,referenced_tweets.id.author_id,in_reply_to_user_id',
+      'user.fields': 'id,name,username'
+    });
+
+    console.log('📡 Making API request:', url);
+    const response = await this.makeAuthenticatedRequest(url, 'GET', params);
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error('❌ API request failed:', {
+        status: response.status,
+        error,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+      throw {
+        status: response.status,
+        response,
+        message: error.detail || 'Failed to hydrate tweets'
+      };
+    }
+
+    const data = await response.json() as TwitterResponse;
+    console.log('📥 Raw API response:', JSON.stringify(data, null, 2));
+    
+    return this.processTweetsResponse(data);
   }
 } 
