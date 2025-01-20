@@ -3,6 +3,7 @@ import { useAdminStore } from '@/stores/useAdminStore';
 import { AdminChatList } from './AdminChatList';
 import { AdminChatInput } from './AdminChatInput';
 import { AdminChatMessage } from './AdminChatMessage';
+import { SystemPromptCollapse } from './SystemPromptCollapse';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
@@ -13,6 +14,9 @@ export function AdminChatInterface() {
     fetchChats();
   }, [fetchChats]);
 
+  const systemMessage = currentChat?.messages?.find(m => m.role === 'SYSTEM');
+  const chatMessages = currentChat?.messages?.filter(m => m.role !== 'SYSTEM') || [];
+
   return (
     <div className="flex h-full">
       <AdminChatList />
@@ -21,20 +25,27 @@ export function AdminChatInterface() {
         {currentChat ? (
           <>
             <Card className="flex-1 m-4 overflow-hidden">
-              <ScrollArea className="h-full p-4">
-                <div className="space-y-4">
-                  {currentChat.messages?.map((message, index) => (
-                    <AdminChatMessage key={index} message={message} />
-                  ))}
-                  {isLoading && (
-                    <div className="flex justify-center py-2">
-                      <div className="animate-pulse text-muted">
-                        Amariel is thinking...
+              <div className="h-full flex flex-col">
+                {systemMessage && (
+                  <div className="px-4 pt-4">
+                    <SystemPromptCollapse systemMessage={systemMessage} />
+                  </div>
+                )}
+                <ScrollArea className="flex-1 p-4">
+                  <div className="space-y-4">
+                    {chatMessages.map((message, index) => (
+                      <AdminChatMessage key={index} message={message} />
+                    ))}
+                    {isLoading && (
+                      <div className="flex justify-center py-2">
+                        <div className="animate-pulse text-muted">
+                          Amariel is thinking...
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
+                    )}
+                  </div>
+                </ScrollArea>
+              </div>
             </Card>
             <div className="p-4">
               <AdminChatInput />
