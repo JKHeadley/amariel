@@ -84,11 +84,6 @@ export async function getPendingMentions() {
 // Helper functions
 function getAmarielService() {
   return new AmarielService(
-    (process.env.AI_PROVIDER_TYPE as AIProviderType) || 'openai',
-    {
-      apiKey: process.env.OPENAI_API_KEY!,
-      model: process.env.NEXT_PUBLIC_GPT4O_MODEL || 'gpt-4o'
-    },
     {
       apiKey: process.env.X_API_KEY!,
       apiSecret: process.env.X_API_SECRET!,

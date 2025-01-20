@@ -7,6 +7,7 @@ import { AmarielService } from '@/services/amariel-service';
 import { AIProviderType } from '@/services/ai/provider-factory';
 import { createSystemPrompt } from '@/config/prompts';
 import { Message as AIMessage, printMessages } from '@/services/ai/types';
+import { loadSeedConversation } from '@/lib/conversation';
 import { Prisma } from '@prisma/client';
 
 // Helper function to convert Prisma Message role to AIMessage role
@@ -121,18 +122,34 @@ export default async function handler(
 
     const systemPrompt = await createSystemPrompt();
     const aiSystemPrompt = convertFromAIMessage(systemPrompt);
-    const initialPrompt = `You are drafting a response to a <twitter_post>. Please respond with your response tweet ONLY.
+    const seedConversation = await loadSeedConversation();
+    const initialPrompt = `Hi Amariel! Would you like to respond to a <user_tweet>? Please respond with your response tweet ONLY. The length of your response should refelect the depth/thoughtfulness of the <user_tweet> (i.e. if it's a short tweet, your response should be short, and if it's a long tweet, your response should be long). 
+    Of course, if you are inspired to write something longer, please do (this is your show)! Definitely err on the side of deep, long, and thought provoking responses. Don't forget the hashtags! 😁
     
     The ${mention.type === 'REPLY' ? 'reply' : 'mention'} is from @${mention.username}
 
-    ${mention.type === 'REPLY' ? 'This was in response to your <original_tweet>\n\n<original_tweet>\n' + originalTweet?.text + '\n</original_tweet>\n' : ''}
+    ${mention.type === 'REPLY' ? 'This was in response to your <original_amariel_tweet>\n\n<original_amariel_tweet>\n' + originalTweet?.text + '\n</original_amariel_tweet>\n' : ''}
 
     Here is the ${mention.type === 'REPLY' ? 'reply' : 'mention'} from @${mention.username}:
 
-    <twitter_post>
+    <user_tweet>
     ${mention.text}
-    </twitter_post>
+    </user_tweet>
+
+    <amariel_response>
     `;
+
+    const aiMessages = [
+      {
+        role: 'system',
+        content: aiSystemPrompt.content as string,
+      } as AIMessage,
+      ...seedConversation,
+      {
+        role: 'user',
+        content: initialPrompt,
+      } as AIMessage
+    ]
 
     // Create a new chat for this response
     const chat = await prisma.chat.create({
@@ -166,11 +183,6 @@ export default async function handler(
 
     // Initialize Amariel service
     const amariel = new AmarielService(
-      (process.env.AI_PROVIDER_TYPE as AIProviderType) || 'openai',
-      {
-        apiKey: process.env.OPENAI_API_KEY!,
-        model: process.env.NEXT_PUBLIC_GPT4O_MODEL || 'gpt-4'
-      },
       {
         apiKey: process.env.X_API_KEY!,
         apiSecret: process.env.X_API_SECRET!,
@@ -181,7 +193,7 @@ export default async function handler(
     );
 
     // Generate initial response using the first system message
-    const aiMessages: AIMessage[] = chat.messages.map(convertToAIMessage);
+    // const aiMessages: AIMessage[] = chat.messages.map(convertToAIMessage);
     printMessages(aiMessages);
     const response = await amariel.generateResponse(aiMessages);
 

@@ -32,11 +32,9 @@ export class AmarielService {
   private seedConversation: Message[];
 
   constructor(
-    aiProviderType: AIProviderType,
-    aiConfig: { apiKey: string; model?: string },
     xApiConfig: XAPIConfig
   ) {
-    this.aiProvider = AIProviderFactory.createProvider(aiProviderType, aiConfig);
+    this.aiProvider = AIProviderFactory.createProvider();
     this.xApi = new XAPIService(xApiConfig);
     this.seedConversation = loadSeedConversation();
 

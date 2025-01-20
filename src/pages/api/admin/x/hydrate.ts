@@ -33,11 +33,6 @@ export default async function handler(
 
     // Initialize Amariel service
     const amariel = new AmarielService(
-      (process.env.AI_PROVIDER_TYPE as AIProviderType) || 'openai',
-      {
-        apiKey: process.env.OPENAI_API_KEY!,
-        model: process.env.NEXT_PUBLIC_GPT4O_MODEL || 'gpt-4'
-      },
       {
         apiKey: process.env.X_API_KEY!,
         apiSecret: process.env.X_API_SECRET!,
