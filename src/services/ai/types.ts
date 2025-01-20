@@ -14,3 +14,7 @@ export interface AIProviderConfig {
 export interface AIProvider {
   generateCompletion(messages: Message[]): Promise<string>;
 } 
+
+export function printMessages(messages: Message[]) {
+  console.log(messages.map(msg => `${msg.role}:\n${msg.content}\n`).join("\n"));
+}

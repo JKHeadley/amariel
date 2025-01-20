@@ -2,13 +2,53 @@ import { NextApiRequest, NextApiResponse } from 'next';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/pages/api/auth/[...nextauth]';
 import { prisma } from '@/lib/db';
-import { ChatType, MentionStatus } from '@prisma/client';
+import { Chat, ChatType, Mention, Message, MentionStatus, Role } from '@prisma/client';
 import { AmarielService } from '@/services/amariel-service';
 import { AIProviderType } from '@/services/ai/provider-factory';
+import { createSystemPrompt } from '@/config/prompts';
+import { Message as AIMessage, printMessages } from '@/services/ai/types';
+import { Prisma } from '@prisma/client';
+
+// Helper function to convert Prisma Message role to AIMessage role
+function convertRole(role: Role): AIMessage['role'] {
+  switch (role) {
+    case 'SYSTEM': return 'system';
+    case 'USER': return 'user';
+    case 'ASSISTANT': return 'assistant';
+    default: throw new Error(`Invalid role: ${role}`);
+  }
+}
+
+// Helper function to convert Prisma Message to AIMessage
+function convertToAIMessage(message: Message): AIMessage {
+  return {
+    role: convertRole(message.role),
+    content: String(message.content)
+  };
+}
+
+function convertFromAIMessage(message: AIMessage): Partial<Message> {
+  return {
+    role: message.role === 'system' ? 'SYSTEM' : message.role === 'user' ? 'USER' : 'ASSISTANT',
+    content: message.content,
+  };
+}
+
+type ChatWithMessages = Prisma.ChatGetPayload<{
+  include: {
+    messages: true;
+    mentions: true;
+  }
+}>;
+
+type GenerateResponse = {
+  chat?: ChatWithMessages;
+  error?: string;
+};
 
 export default async function handler(
   req: NextApiRequest,
-  res: NextApiResponse
+  res: NextApiResponse<GenerateResponse>
 ) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -79,6 +119,21 @@ export default async function handler(
       originalTweet = mention.originalTweet;
     }
 
+    const systemPrompt = await createSystemPrompt();
+    const aiSystemPrompt = convertFromAIMessage(systemPrompt);
+    const initialPrompt = `You are drafting a response to a <twitter_post>. Please respond with your response tweet ONLY.
+    
+    The ${mention.type === 'REPLY' ? 'reply' : 'mention'} is from @${mention.username}
+
+    ${mention.type === 'REPLY' ? 'This was in response to your <original_tweet>\n\n<original_tweet>\n' + originalTweet?.text + '\n</original_tweet>\n' : ''}
+
+    Here is the ${mention.type === 'REPLY' ? 'reply' : 'mention'} from @${mention.username}:
+
+    <twitter_post>
+    ${mention.text}
+    </twitter_post>
+    `;
+
     // Create a new chat for this response
     const chat = await prisma.chat.create({
       data: {
@@ -89,18 +144,25 @@ export default async function handler(
           connect: { id: mention.id }
         },
         messages: {
-          create: {
-            role: 'SYSTEM',
-            content: `You are helping to draft a response to ${mention.type === 'REPLY' ? 'a reply' : 'a mention'} on X/Twitter. The ${mention.type === 'REPLY' ? 'reply' : 'mention'} is from @${mention.username}: "${mention.text}"${originalTweet ? `\n\nThis was in response to your tweet: "${originalTweet.text}"` : ''}`,
-            userId: session.user.id,
-          }
+          create: [
+            {
+              role: aiSystemPrompt.role,
+              content: aiSystemPrompt.content as string,
+              userId: session.user.id
+            },
+            {
+              role: 'USER',
+              content: initialPrompt,
+              userId: session.user.id
+            }
+          ]
         }
       },
       include: {
         messages: true,
         mentions: true,
       }
-    });
+    }) as ChatWithMessages;
 
     // Initialize Amariel service
     const amariel = new AmarielService(
@@ -118,11 +180,10 @@ export default async function handler(
       }
     );
 
-    // Generate initial response
-    const response = await amariel.generateResponse([{
-      role: 'system',
-      content: chat.messages[0].content
-    }]);
+    // Generate initial response using the first system message
+    const aiMessages: AIMessage[] = chat.messages.map(convertToAIMessage);
+    printMessages(aiMessages);
+    const response = await amariel.generateResponse(aiMessages);
 
     // Save the AI response
     const aiMessage = await prisma.message.create({
@@ -145,12 +206,14 @@ export default async function handler(
     });
 
     // Return both the chat and the generated response
-    return res.status(200).json({ 
+    const messages: Message[] = [...chat.messages, aiMessage];
+    const responseObj: GenerateResponse = {
       chat: {
         ...chat,
-        messages: [...chat.messages, aiMessage]
-      } 
-    });
+        messages
+      }
+    };
+    return res.status(200).json(responseObj);
   } catch (error) {
     console.error('Error generating response:', error);
     return res.status(500).json({ error: 'Internal server error' });

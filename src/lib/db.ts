@@ -176,3 +176,19 @@ export async function getChatHistoryForOpenAI(chatId: string) {
     content: msg.content,
   }))
 } 
+
+export async function getAmarielTweets({limit}: {limit?: number}) {
+  // fetch the latest <limit> tweets
+  return prisma.tweet.findMany({
+    where: {
+      authorId: process.env.X_USER_ID,
+    },
+    include: {
+      parentTweet: true,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    take: limit,
+  })
+}
