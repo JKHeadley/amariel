@@ -10,6 +10,7 @@ const MODEL_TOKEN_LIMITS: { [key: string]: number } = {
   'grok-beta': 8000,
   'llama2': 4096,
   'llama3.3': 250000,
+  'deepseek-r1:70b': 250000,
   'default': 100000
 };
 

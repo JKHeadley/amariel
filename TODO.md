@@ -5,3 +5,4 @@ TODO:
 - Auto-hydrated fetched tweets
 - Find good local model
 - Shorten seed prompt for local model
+- Make SURE the full thread is loaded when generating responses

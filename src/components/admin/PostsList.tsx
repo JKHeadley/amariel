@@ -276,31 +276,53 @@ export function PostsList() {
     }
   };
 
-  const generateResponse = async (mentionId: string) => {
+  const generateResponse = async (mention: PendingMentionWithResponse) => {
     try {
       setGeneratingResponses(prev => {
         const next = new Set(prev);
-        next.add(mentionId);
+        next.add(mention.id);
         return next;
       });
-      const response = await fetch(`/api/admin/x/mentions/${mentionId}/generate`, {
-        method: 'POST'
+
+      const response = await fetch(`/api/admin/x/mentions/${mention.id}/generate`, {
+        method: 'POST',
       });
-      if (!response.ok) throw new Error('Failed to generate response');
-      const data = await response.json();
-      setPendingMentions([]); // Reset to trigger a refresh
-      
-      // Redirect to the chat for response refinement
-      if (data.chat?.id) {
-        router.push(`/admin/chats/${data.chat.id}`);
+
+      if (!response.ok) {
+        throw new Error('Failed to generate response');
       }
+
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Get the latest assistant message - messages are already ordered by createdAt desc
+      const lastAssistantMessage = data.chat.messages[0];
+
+      // Update the pending mention with the new response
+      const updatedMention = {
+        ...mention,
+        status: 'PROCESSING',
+        chat: data.chat,
+        response: lastAssistantMessage?.content || '',
+      };
+
+      // Update the pending mentions list
+      setPendingMentions(
+        pendingMentions.map((m) =>
+          m.id === mention.id ? updatedMention : m
+        )
+      );
+
+      toast.success('Response generated successfully');
     } catch (error) {
       console.error('Error generating response:', error);
       toast.error('Failed to generate response');
     } finally {
       setGeneratingResponses(prev => {
         const next = new Set(prev);
-        next.delete(mentionId);
+        next.delete(mention.id);
         return next;
       });
     }
@@ -402,7 +424,9 @@ export function PostsList() {
   );
 
   const renderPendingMention = (mention: PendingMentionWithResponse) => {
+    // Get the latest response - messages are already ordered by createdAt desc
     const latestResponse = mention.chat?.messages[0]?.content;
+    console.log("latestResponse", latestResponse);
     const isProcessing = mention.status === 'PROCESSING';
 
     const handleReset = async () => {
@@ -461,7 +485,7 @@ export function PostsList() {
           ) : (
             <Button 
               variant="default"
-              onClick={() => generateResponse(mention.id)}
+              onClick={() => generateResponse(mention)}
               disabled={generatingResponses.has(mention.id)}
             >
               {generatingResponses.has(mention.id) && (

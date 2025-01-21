@@ -218,12 +218,24 @@ export default async function handler(
     });
 
     // Return both the chat and the generated response
-    const messages: Message[] = [...chat.messages, aiMessage];
-    const responseObj: GenerateResponse = {
-      chat: {
-        ...chat,
-        messages
+    const updatedChat = await prisma.chat.findUnique({
+      where: { id: chat.id },
+      include: {
+        messages: {
+          orderBy: {
+            createdAt: 'desc'
+          }
+        },
+        mentions: true
       }
+    });
+
+    if (!updatedChat) {
+      throw new Error('Failed to fetch updated chat');
+    }
+
+    const responseObj: GenerateResponse = {
+      chat: updatedChat
     };
     return res.status(200).json(responseObj);
   } catch (error) {
