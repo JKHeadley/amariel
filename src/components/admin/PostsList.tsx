@@ -187,7 +187,7 @@ export function PostsList() {
   const [mentionModalOpen, setMentionModalOpen] = useState(false);
   const [generatingResponses, setGeneratingResponses] = useState<Set<string>>(new Set());
   const [generatingAll, setGeneratingAll] = useState(false);
-  const [activeTab, setActiveTab] = useState('posts');
+  const [activeTab, setActiveTab] = useState('pending');
   const router = useRouter();
 
   useEffect(() => {
@@ -527,7 +527,7 @@ export function PostsList() {
     <>
       <div className="h-[calc(100vh-4rem)]">
         <Tabs 
-          defaultValue="posts" 
+          defaultValue="pending" 
           className="h-full flex flex-col"
           onValueChange={setActiveTab}
           value={activeTab}

@@ -22,10 +22,10 @@ import {
 
 const tabs = [
   {
-    name: 'Overview',
-    icon: Activity,
-    color: 'text-blue-500',
-    bgColor: 'bg-blue-100'
+    name: 'Posts',
+    icon: FileText,
+    color: 'text-green-500',
+    bgColor: 'bg-green-100'
   },
   {
     name: 'Messages',
@@ -40,16 +40,16 @@ const tabs = [
     bgColor: 'bg-pink-100'
   },
   {
-    name: 'Posts',
-    icon: FileText,
-    color: 'text-green-500',
-    bgColor: 'bg-green-100'
-  },
-  {
     name: 'Settings',
     icon: Settings,
     color: 'text-orange-500',
     bgColor: 'bg-orange-100'
+  },
+  {
+    name: 'Overview',
+    icon: Activity,
+    color: 'text-blue-500',
+    bgColor: 'bg-blue-100'
   }
 ];
 
@@ -79,14 +79,12 @@ export default function AdminDashboard() {
   const renderContent = () => {
     switch (selectedTab) {
       case 0:
-        return <AdminAnalyticsDashboard />;
+        return <PostsList />;
       case 1:
         return <AdminChatInterface />;
       case 2:
         return <AdminThoughtInterface />;
       case 3:
-        return <PostsList />;
-      case 4:
         return (
           <div className="p-6 max-w-2xl mx-auto">
             <XAutomationSettings
@@ -97,8 +95,10 @@ export default function AdminDashboard() {
             />
           </div>
         );
-      default:
+      case 4:
         return <AdminAnalyticsDashboard />;
+      default:
+        return <PostsList />;
     }
   };
 
