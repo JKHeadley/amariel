@@ -426,7 +426,6 @@ export function PostsList() {
   const renderPendingMention = (mention: PendingMentionWithResponse) => {
     // Get the latest response - messages are already ordered by createdAt desc
     const latestResponse = mention.chat?.messages[0]?.content;
-    console.log("latestResponse", latestResponse);
     const isProcessing = mention.status === 'PROCESSING';
 
     const handleReset = async () => {

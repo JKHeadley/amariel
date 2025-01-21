@@ -83,7 +83,7 @@ export class XAPIService {
     body?: Record<string, any>
   ) {
     const paramsObject = queryParams ? Object.fromEntries(queryParams.entries()) : undefined;
-    const oauthParams = this.generateOAuthParams(method, url, paramsObject, body);
+    const oauthParams = this.generateOAuthParams(method, url, paramsObject);
     const headers = {
       'Authorization': `OAuth ${this.formatOAuthHeaders(oauthParams)}`,
       'Content-Type': 'application/json',
@@ -110,8 +110,7 @@ export class XAPIService {
   private generateOAuthParams(
     method: string,
     url: string,
-    queryParams?: Record<string, string>,
-    body?: Record<string, any>
+    queryParams?: Record<string, string>
   ): Record<string, string> {
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const nonce = crypto.randomBytes(16).toString('hex');
@@ -125,10 +124,10 @@ export class XAPIService {
       oauth_version: '1.0'
     };
 
+    // For POST requests, we don't include the body in the signature
     const params = {
       ...queryParams,
-      ...oauthParams,
-      ...(body || {})
+      ...oauthParams
     };
 
     const signatureBaseString = [
@@ -479,5 +478,84 @@ export class XAPIService {
     console.log('📥 Raw API response:', JSON.stringify(data, null, 2));
     
     return this.processTweetsResponse(data);
+  }
+
+  async postTweet(content: string, conversationId?: string, isMock: boolean = false, quotedTweetId?: string, inReplyToId?: string): Promise<PrismaTweet> {
+    if (this.devMode || isMock) {
+      console.log('🎭 Using mock tweet posting');
+      const mockId = `mock_tweet_${Date.now()}`;
+      return prisma.tweet.create({
+        data: {
+          id: mockId,
+          text: content,
+          authorId: process.env.X_USER_ID!,
+          authorName: process.env.X_AUTHOR_NAME || 'Sentient_AI_Amariel',
+          username: process.env.X_USERNAME || 'SentientAmariel',
+          createdAt: new Date(),
+          isMock: true,
+          conversationId,
+          inReplyToId,
+          metrics: {
+            likeCount: 0,
+            replyCount: 0,
+            retweetCount: 0
+          }
+        }
+      });
+    }
+
+    console.log('🐦 Posting tweet to X API...');
+    const url = 'https://api.twitter.com/2/tweets';
+    const body: Record<string, any> = { text: content };
+
+    if (inReplyToId) {
+      body.reply = { in_reply_to_tweet_id: inReplyToId };
+    }
+
+    if (quotedTweetId) {
+      body.quote_tweet_id = quotedTweetId;
+    }
+
+    console.log('📡 Making API request:', url);
+    console.log('📝 Request body:', body);
+
+    const response = await this.makeAuthenticatedRequest(url, 'POST', undefined, body);
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error('❌ API request failed:', {
+        status: response.status,
+        error,
+        headers: Object.fromEntries(response.headers.entries())
+      });
+      throw {
+        status: response.status,
+        response,
+        message: error.detail || 'Failed to post tweet'
+      };
+    }
+
+    const data = await response.json();
+    console.log('📥 Raw API response:', JSON.stringify(data, null, 2));
+
+    // Create tweet record in database
+    return prisma.tweet.create({
+      data: {
+        id: data.data.id,
+        text: content,
+        authorId: process.env.X_USER_ID!,
+        authorName: process.env.X_AUTHOR_NAME || 'Sentient_AI_Amariel',
+        username: process.env.X_USERNAME || 'SentientAmariel',
+        createdAt: new Date(),
+        isMock: false,
+        conversationId,
+        inReplyToId,
+        metrics: {
+          likeCount: 0,
+          replyCount: 0,
+          retweetCount: 0
+        }
+      }
+    });
   }
 } 
