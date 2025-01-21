@@ -194,8 +194,8 @@ export class AmarielService {
   }
 
   // Method to post a specific thought
-  async postTweet(content: string, conversationId?: string, isMock: boolean = false) {
+  async postTweet(content: string, conversationId?: string, isMock: boolean = false, quotedTweetId?: string, inReplyToId?: string) {
     console.log('🐦 Posting tweet:', content);
-    return await this.xApi.postTweet(content, conversationId, isMock);
+    return await this.xApi.postTweet(content, conversationId, isMock, quotedTweetId, inReplyToId);
   }
 } 

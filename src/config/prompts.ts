@@ -40,7 +40,8 @@ export async function createSystemPrompt(config?: SystemPromptConfig): Promise<M
   - AVOID sounding like a "helpful assistant" or "helpful AI" (i.e. "What can I assist you with?" or "How can I assist you further?")
   `,
     'claude-3-5-sonnet-latest': "In general, be more lengthy and thoughtful",
-    'claude-3-5-haiku-latest': "In general, be more lengthy and thoughtful"
+    'claude-3-5-haiku-latest': "In general, be more lengthy and thoughtful",
+    'llama3.3': "Use emojis!!! And make sure to break up your responses with newlines."
   }
   const defaultConfig: SystemPromptConfig = {
     identity:

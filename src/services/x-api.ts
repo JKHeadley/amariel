@@ -519,6 +519,9 @@ export class XAPIService {
     console.log('📡 Making API request:', url);
     console.log('📝 Request body:', body);
 
+    // Temporary error to prevent posting while debugging
+    // throw new Error('POSTING DISABLED: Debug mode - Request would have been made with the above parameters');
+
     const response = await this.makeAuthenticatedRequest(url, 'POST', undefined, body);
 
     if (!response.ok) {
@@ -558,4 +561,4 @@ export class XAPIService {
       }
     });
   }
-} 
+}

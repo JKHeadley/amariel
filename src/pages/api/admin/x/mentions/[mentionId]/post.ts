@@ -22,10 +22,6 @@ export default async function handler(
   const mentionId = req.query.mentionId as string;
 
   try {
-    // Extract the actual tweet ID if this is a pending reply
-    const isPendingReply = mentionId.startsWith('pending_reply_');
-    const tweetId = isPendingReply ? mentionId.replace('pending_reply_', '') : null;
-
     // Get the mention with its chat messages and relevant tweets
     const mention = await prisma.mention.findUnique({
       where: { id: mentionId },
@@ -47,6 +43,15 @@ export default async function handler(
         originalTweet: true
       }
     });
+
+    // Add debug logging
+    console.log('DEBUG - Full mention object:', JSON.stringify({
+      id: mention?.id,
+      status: mention?.status,
+      originalTweet: mention?.originalTweet,
+      conversationId: mention?.conversationId,
+      isMock: mention?.isMock
+    }, null, 2));
 
     if (!mention) {
       return res.status(404).json({ error: 'Mention not found' });
@@ -75,15 +80,9 @@ export default async function handler(
     const isMock = mention.isMock || (mention.originalTweet?.isMock ?? false);
     console.log('Is mock interaction:', isMock);
 
-    // Determine the correct tweet to reply to
-    let parentTweetId;
-    if (isPendingReply) {
-      // For pending replies, we reply to the tweet that triggered the pending reply
-      parentTweetId = tweetId;
-    } else {
-      // For mentions, we reply to the tweet that mentioned us
-      parentTweetId = mention.originalTweet?.id;
-    }
+    // Get the ID of the tweet we're replying to
+    const parentTweetId = mentionId;
+    console.log('Replying to tweet:', parentTweetId);
 
     let tweetRecord;
 
@@ -110,12 +109,22 @@ export default async function handler(
       });
     } else {
       // For real tweets, post to X API
-      const tweet = await amariel.postTweet(
-        response.content, 
-        mention.conversationId, 
-        false,
-        undefined,
+      console.log('Posting tweet with params:', {
+        content: response.content,
+        conversationId: mention.conversationId,
+        isMock,
         parentTweetId
+      });
+
+      // Convert null to undefined for parentTweetId
+      const replyToId = typeof parentTweetId === 'string' ? parentTweetId : undefined;
+
+      const tweet = await amariel.postTweet(
+        response.content,
+        mention.conversationId,
+        isMock,
+        undefined,
+        replyToId
       );
       tweetRecord = tweet;
     }
